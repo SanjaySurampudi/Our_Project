@@ -30,7 +30,7 @@
 
 | 🌐 Web Dashboard | 📟 OLED Display |
 |:---:|:---:|
-| ![Website](assets/website_screenshot.png) | ![OLED](assets/oled_display.png) |
+| ![Website](website_screenshot.png) | ![OLED](oled_display.png) |
 | Real-time map with live GPS marker | Coordinates + Message + RSSI |
 
 </div>
