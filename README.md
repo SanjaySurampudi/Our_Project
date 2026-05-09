@@ -1,14 +1,15 @@
 <div align="center">
 
-# 📡 LoRa GPS Emergency Communication System
+# 📡 LoRa GPS Long Distance Tracker
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=22&pause=1000&color=1D9E75&center=true&vCenter=true&width=600&lines=Wireless+GPS+Tracker+via+LoRa+SX1278;No+Internet.+No+SIM.+Just+Radio+Waves.;Real-Time+Map+%2B+OLED+Display;Built+with+Arduino+UNO+%26+Python" alt="Typing SVG" />
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=22&pause=1000&color=1D9E75&center=true&vCenter=true&width=600&lines=Wireless+GPS+Tracker+via+LoRa+SX1278;No+Internet.+No+SIM.+Just+Radio+Waves.;Real-Time+Road+Map+%2B+OLED+Display;Built+with+Arduino+UNO+%26+Python+Flask" alt="Typing SVG" />
 
 <br/>
 
 [![Arduino](https://img.shields.io/badge/Arduino-UNO-00979D?style=for-the-badge&logo=arduino&logoColor=white)](https://www.arduino.cc/)
 [![Python](https://img.shields.io/badge/Python-Flask-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://flask.palletsprojects.com/)
 [![LoRa](https://img.shields.io/badge/LoRa-SX1278_433MHz-1D9E75?style=for-the-badge)](https://www.semtech.com/)
+[![OSRM](https://img.shields.io/badge/Routing-OSRM_Road_Route-E08020?style=for-the-badge)](http://project-osrm.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-SanjaySurampudi-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/SanjaySurampudi)
 
@@ -16,6 +17,7 @@
 
 > **Transmit GPS coordinates and text messages wirelessly over 2–5 km**  
 > No internet. No SIM card. No infrastructure needed.  
+> Receiver plots the **exact road route** on a live map with RSSI signal strength.  
 > Built as a B.Tech ECE project at **Aditya University, Surampalem** 🎓
 
 <br/>
@@ -30,8 +32,8 @@
 
 | 🌐 Web Dashboard | 📟 OLED Display |
 |:---:|:---:|
-| ![Website](website_screenshot1.jpeg) | ![OLED](oled_display.jpeg) |
-| Real-time map with live GPS marker | Coordinates + Message + RSSI |
+| ![Website](assets/website_screenshot.png) | ![OLED](assets/oled_display.png) |
+| Real-time map with exact road route + GPS track history | Coordinates + Message + RSSI (dBm) |
 
 </div>
 
@@ -42,13 +44,16 @@
 | Feature | Details |
 |---|---|
 | 📡 **Wireless Range** | 2–5 km line of sight at 433 MHz |
-| 🛰️ **GPS Tracking** | Real coordinates from NEO-6M module |
-| 💬 **Text Messaging** | Send custom text alongside GPS data |
-| 🌐 **Live Web Dashboard** | Interactive OpenStreetMap with moving marker |
-| 📟 **OLED Display** | Shows data on receiver side instantly |
-| 🔌 **No Internet Needed** | Pure LoRa RF — works in disaster zones |
-| 🐍 **Python Server** | Lightweight Flask server, runs on any laptop |
-| 🛡️ **Packet Filtering** | Corrupted LoRa packets auto-filtered |
+| 🛰️ **GPS Tracking** | Real coordinates from NEO-6M module via TinyGPS++ |
+| 💬 **Text Messaging** | Send custom text alongside GPS coordinates |
+| 🗺️ **Exact Road Route** | OSRM draws the actual driving path — not a straight line |
+| 📊 **RSSI Display** | Signal strength shown live on dashboard and OLED |
+| 🔵 **GPS Track History** | Dotted trail of all past TX positions on map |
+| 🌐 **Live Web Dashboard** | Interactive OpenStreetMap, auto-updates every 3 seconds |
+| 📟 **OLED Display** | Shows lat, lng, message, and RSSI on receiver instantly |
+| 🐍 **Modular Python Server** | Clean separation: serial reader, router, Flask routes |
+| 🔌 **No SIM / No WiFi Needed** | Pure LoRa RF — works in disaster zones |
+| 🛡️ **Packet Filtering** | Corrupted LoRa packets auto-filtered by server |
 
 ---
 
@@ -62,29 +67,44 @@
 ║  │ NEO-6M  │  UART (pins3,4) ║                ║        │  OLED SSD1306    │  ║
 ║  │   GPS   │──────────────►  ║                ║        │  (I2C · A4/A5)   │  ║
 ║  └─────────┘                 ║                ║        └──────────────────┘  ║
-║       │                      ║                ║                ▲             ║
-║       ▼                      ║                ║                │             ║
+║       │ TinyGPS++            ║                ║                ▲             ║
+║       ▼                      ║                ║                │ I2C         ║
 ║  ┌───────────┐               ║                ║       ┌────────────────┐     ║
 ║  │  Arduino  │               ║   433 MHz RF   ║       │  Arduino UNO   │     ║
-║  │    UNO    │               ║ ◄════════════► ║       │   (Receiver)   │     ║
+║  │    UNO    │◄════════════════════════════════════════│   (Receiver)   │     ║
 ║  └───────────┘               ║                ║       └────────────────┘     ║
 ║       │ SPI                  ║                ║                │ SPI         ║
 ║       ▼                      ║                ║                ▼             ║
 ║  ┌──────────┐                ║                ║       ┌────────────────┐     ║
-║  │  LoRa    │  =====════════════════════════════====► │  LoRa SX1278   │     ║
-║  │ SX1278   │                ║                ║       │  (RX Module)   │     ║
+║  │  LoRa    │════════════════════════════════════════►│  LoRa SX1278   │     ║
+║  │ SX1278   │  lat,lng,msg   ║                ║       │  + RSSI read   │     ║
 ║  └──────────┘                ║                ║       └────────────────┘     ║
 ╚══════════════════════════════╝                ║                │ USB Serial  ║
                                                 ║                ▼             ║
-                                                ║       ┌────────────────┐     ║
-                                                ║       │  Python Flask  │     ║
-                                                ║       │    Server      │     ║
-                                                ║       └────────────────┘     ║
+                                                ║  ┌─────────────────────────┐ ║
+                                                ║  │     Python Flask Server  │ ║
+                                                ║  │  ┌───────────────────┐  │ ║
+                                                ║  │  │  serial_reader.py │  │ ║
+                                                ║  │  │  (parses DATA:+   │  │ ║
+                                                ║  │  │   RSSI from port) │  │ ║
+                                                ║  │  └───────────────────┘  │ ║
+                                                ║  │  ┌───────────────────┐  │ ║
+                                                ║  │  │   flask_routes.py │  │ ║
+                                                ║  │  │  (/data /history  │  │ ║
+                                                ║  │  │   /route endpoints│  │ ║
+                                                ║  │  └───────────────────┘  │ ║
+                                                ║  │  ┌───────────────────┐  │ ║
+                                                ║  │  │     router.py     │  │ ║
+                                                ║  │  │  (OSRM road route │  │ ║
+                                                ║  │  │   real geometry)  │  │ ║
+                                                ║  │  └───────────────────┘  │ ║
+                                                ║  └─────────────────────────┘ ║
                                                 ║                │             ║
                                                 ║                ▼             ║
                                                 ║       ┌────────────────┐     ║
                                                 ║       │  Web Browser   │     ║
-                                                ║       │  (Live Map)    │     ║
+                                                ║       │  (Live Map +   │     ║
+                                                ║       │  Road Route)   │     ║
                                                 ║       └────────────────┘     ║
                                                 ╚══════════════════════════════╝
 ```
@@ -97,15 +117,15 @@
 | Component | Qty | Notes |
 |---|---|---|
 | Arduino UNO | 1 | Any clone works |
-| GPS NEO-6M | 1 | Include antenna |
-| LoRa SX1278 433 MHz | 1 | Include antenna |
+| GPS NEO-6M | 1 | Include ceramic antenna |
+| LoRa SX1278 433 MHz | 1 | Include wire antenna |
 | Breadboard + Jumper Wires | — | Male-to-male |
 
 ### 📥 Receiver Side
 | Component | Qty | Notes |
 |---|---|---|
 | Arduino UNO | 1 | Any clone works |
-| LoRa SX1278 433 MHz | 1 | Include antenna |
+| LoRa SX1278 433 MHz | 1 | Include wire antenna |
 | OLED 0.96" SSD1306 I2C | 1 | 128×64 pixels |
 | Breadboard + Jumper Wires | — | — |
 | PC / Laptop | 1 | Runs Flask server |
@@ -135,8 +155,8 @@
 |---|---|
 | VCC | 5V |
 | GND | GND |
-| TX | Pin 4 |
-| RX | Pin 3 |
+| TX | Pin 4 (SoftwareSerial RX) |
+| RX | Pin 3 (SoftwareSerial TX) |
 
 ### OLED SSD1306 → Arduino UNO *(RX side only)*
 
@@ -166,7 +186,7 @@ Open Arduino IDE → `Sketch → Include Library → Manage Libraries` and insta
 ### 2️⃣ Python Dependencies
 
 ```bash
-pip install flask pyserial
+pip install flask pyserial requests
 ```
 
 ---
@@ -174,23 +194,26 @@ pip install flask pyserial
 ## 📂 Project Structure
 
 ```
-lora-gps-tracker/
+lora_tracker/
+│
+├── 📄 app.py                  # Entry point — run this to start the server
+├── 📄 serial_reader.py        # Serial port thread + DATA:/RSSI packet parser
+├── 📄 router.py               # OSRM road route caller — returns real road geometry
+├── 📄 flask_routes.py         # All Flask URL handlers + HTML dashboard template
 │
 ├── 📁 transmitter/
-│   └── transmitter.ino        # Upload to TX Arduino (GPS side)
+│   └── tx.ino                 # Upload to TX Arduino (GPS + LoRa side)
 │
 ├── 📁 receiver/
-│   └── receiver.ino           # Upload to RX Arduino (OLED side)
-│
-├── 📁 server/
-│   └── server.py              # Run on PC — serves live web dashboard
+│   └── rx.ino                 # Upload to RX Arduino (LoRa + OLED side)
 │
 ├── 📁 assets/
 │   ├── website_screenshot.png
 │   ├── oled_display.png
 │   └── hardware_setup.png
 │
-└── README.md
+├── 📄 requirements.txt
+└── 📄 README.md
 ```
 
 ---
@@ -200,52 +223,67 @@ lora-gps-tracker/
 ### Step 1 — Upload Arduino Code
 
 ```bash
-# 1. Open transmitter/transmitter.ino in Arduino IDE
-# 2. Connect TX Arduino via USB → Tools → Port → select COM port
+# 1. Open transmitter/tx.ino in Arduino IDE
+# 2. Connect TX Arduino → Tools → Port → select correct COM port
 # 3. Click Upload → wait for "Done uploading"
-# 4. Disconnect TX, connect RX Arduino
-# 5. Open receiver/receiver.ino → Upload
+# 4. Disconnect TX Arduino
+
+# 5. Open receiver/rx.ino in Arduino IDE
+# 6. Connect RX Arduino → select its COM port
+# 7. Click Upload → wait for "Done uploading"
 ```
 
-> ⚠️ Always close Arduino Serial Monitor before running server.py — they cannot share the same COM port!
+> ⚠️ Always **close Arduino Serial Monitor** before running app.py — they cannot share the same COM port!
 
-### Step 2 — Start the Web Server
+### Step 2 — Configure the Server
+
+Open `app.py` and set your receiver's fixed GPS location:
+
+```python
+RECEIVER_LAT = 17.087741   # your fixed receiver latitude
+RECEIVER_LNG = 82.068771   # your fixed receiver longitude
+SERIAL_PORT  = None        # None = auto-detect, or set "COM11" / "/dev/ttyUSB0"
+```
+
+### Step 3 — Start the Web Server
 
 ```bash
-cd server
-python server.py
+python app.py
 ```
 
 Expected terminal output:
 ```
-========================================
-  Server starting...
-  Open http://localhost:5000 in your browser
-========================================
-Auto-detected Arduino on: COM11
-Connected! Waiting for data...
-
-RECEIVED: DATA:17.087742,82.068771,Hello from tracker!
-  ✓ Website updated: lat=17.087742 lng=82.068771
+==================================================
+  LoRa Long Distance Tracker
+  Open  http://localhost:5000
+  Receiver: 17.087741, 82.068771
+==================================================
+INFO  serial-reader  Auto-detected serial port: COM11
+INFO  serial-reader  Connected to COM11 — listening for DATA: packets
+INFO  serial-reader  RX  lat=17.385000 lng=78.486700 rssi=-87 | history=1 pts
 ```
 
-### Step 3 — Open the Dashboard
+### Step 4 — Open the Dashboard
 
 ```
 http://localhost:5000
 ```
 
-🎉 A live map appears with a pin at your GPS location — updating every 2 seconds!
+🎉 A live map appears showing:
+- 🔴 **Red dot** — Transmitter (moves with GPS)
+- 🔵 **Blue dot** — Receiver (fixed)
+- 🟢 **Green line** — Exact road route via OSRM
+- 🟠 **Orange dashed** — Straight-line distance
+- 🔵 **Dotted trail** — GPS track history
 
 ---
 
 ## 📦 Data Packet Format
 
-Simple, lightweight CSV format over LoRa:
-
 ```
-Transmitter → LoRa:       17.087742,82.068771,Hello from tracker!
-Receiver   → Serial: DATA:17.087742,82.068771,Hello from tracker!,RSSI:-65
+TX sends over LoRa:      17.087742,82.068771,Hello from tracker!
+RX forwards via Serial:  DATA:17.087742,82.068771,Hello from tracker!,RSSI:-65
+Python server parses:    lat=17.087742  lng=82.068771  msg=...  rssi=-65 dBm
 ```
 
 | Field | Example | Description |
@@ -253,22 +291,36 @@ Receiver   → Serial: DATA:17.087742,82.068771,Hello from tracker!,RSSI:-65
 | Latitude | `17.087742` | GPS latitude (6 decimal places) |
 | Longitude | `82.068771` | GPS longitude (6 decimal places) |
 | Message | `Hello from tracker!` | Custom text payload |
-| RSSI | `-65` | Signal strength in dBm |
+| RSSI | `-65` | Signal strength in dBm (now shown on dashboard) |
 
 ---
 
-## 🧪 Testing Without GPS / OLED
+## 🔧 Key Improvements Over v1
 
-Test the full LoRa → Website pipeline with just two Arduinos and two LoRa modules using hardcoded coordinates:
+| # | Improvement | Details |
+|---|---|---|
+| 1 | **Exact Road Route** | OSRM API returns real driving geometry — map draws the actual road path, not a straight line |
+| 2 | **RSSI Fixed** | `rx.ino` now appends `,RSSI:<value>` to serial output; dashboard shows real dBm value instead of N/A |
+| 3 | **Modular Python Code** | Split into `serial_reader.py`, `router.py`, `flask_routes.py`, `app.py` — no more `__import__()` hacks |
+
+---
+
+## 🧪 Testing Without GPS
+
+Test the full LoRa → Website pipeline using hardcoded coordinates in `tx.ino`:
 
 ```cpp
-// In transmitter.ino — replace GPS with fake coordinates
+// Replace the GPS read section with fixed test coordinates
 float lat = 17.0877;
 float lng = 82.0688;
-String textMessage = "Test message from LoRa!";
+String payload = String(lat, 6) + "," + String(lng, 6) + ",Test message!";
+LoRa.beginPacket();
+LoRa.print(payload);
+LoRa.endPacket();
+delay(3000);
 ```
 
-The website and server.py work identically with real or simulated GPS data.
+The road route, RSSI display, and GPS track history all work identically with real or simulated GPS data.
 
 ---
 
@@ -276,13 +328,15 @@ The website and server.py work identically with real or simulated GPS data.
 
 | ❌ Problem | ✅ Fix |
 |---|---|
-| `Access is denied` on COM port | Close Serial Monitor and stop server.py before uploading |
+| `Access is denied` on COM port | Close Arduino Serial Monitor — it blocks the port |
 | `LoRa init failed!` | Check wiring — VCC must be **3.3V not 5V** |
-| Website shows "Waiting for LoRa data..." | Serial Monitor must be closed while server.py is running |
-| Garbage `DATA:?` lines | Normal — server.py auto-filters corrupted packets |
-| GPS no fix | Take module outdoors or near window — cold fix takes 1–2 min |
-| OLED showing nothing | Try I2C address `0x3D` instead of `0x3C` in receiver.ino |
-| Modules not communicating | Confirm both set to `433E6` frequency in code |
+| Dashboard shows "Waiting for LoRa data..." | Verify RX Arduino is connected and `rx.ino` is uploaded |
+| RSSI shows `--` on dashboard | Re-upload the new `rx.ino` — old version didn't include RSSI in serial output |
+| Map shows only straight line | Check internet connection — OSRM road routing needs internet |
+| GPS no fix | Take module outdoors or near a window — cold fix takes 1–2 min |
+| OLED shows nothing | Try I2C address `0x3D` instead of `0x3C` in `rx.ino` |
+| Both modules not communicating | Confirm both set to `433E6` in code and antennas are attached |
+| `ModuleNotFoundError` | Run `pip install flask pyserial requests` |
 
 ---
 
@@ -292,11 +346,12 @@ The website and server.py work identically with real or simulated GPS data.
 |---|---|
 | LoRa Frequency | 433 MHz |
 | Wireless Range | 2–5 km (line of sight) |
-| Update Interval | Every 2–3 seconds |
+| Update Interval | Every 3 seconds |
 | Data Packet Size | ~40–60 bytes |
-| TX Arduino Flash Used | 53% (17410 / 32256 bytes) |
-| TX Arduino RAM Used | 33% (690 / 2048 bytes) |
-| End-to-end Latency | ~2 seconds |
+| TX Arduino Flash Used | ~53% (17,410 / 32,256 bytes) |
+| TX Arduino RAM Used | ~33% (690 / 2,048 bytes) |
+| End-to-end Latency | ~2–3 seconds |
+| Python Modules | 4 (app, serial_reader, router, flask_routes) |
 
 ---
 
@@ -305,10 +360,11 @@ The website and server.py work identically with real or simulated GPS data.
 - [ ] 🔐 AES-128 encryption for secure transmissions
 - [ ] 📶 ESP8266/ESP32 for standalone WiFi dashboard (no PC needed)
 - [ ] 🗺️ Multi-node tracking — monitor several transmitters on one map
-- [ ] 💾 SQLite database to store and replay GPS track history
+- [ ] 💾 SQLite database to store and replay full GPS track history
 - [ ] 📱 Mobile app (Flutter/React Native) for field use
 - [ ] 🔋 Solar-powered transmitter for remote deployment
 - [ ] 📲 SMS alert via GSM when tracker exits a geofence
+- [ ] 🌐 Offline map tiles for fully internet-free operation
 
 ---
 
@@ -316,7 +372,7 @@ The website and server.py work identically with real or simulated GPS data.
 
 ```
 🚨 Disaster Relief     — Works when cell towers are down
-🌲 Forest Rangers      — Track personnel in remote areas
+🌲 Forest Rangers      — Track personnel in remote areas  
 🎓 IoT Education       — Learn LoRa, GPS, Arduino, Flask together
 🚗 Anti-theft Tracking — Vehicle tracking in rural/offline zones
 🏕️ Trekking Safety    — Emergency beacon for hikers
@@ -332,6 +388,7 @@ The website and server.py work identically with real or simulated GPS data.
 - [Adafruit SSD1306](https://github.com/adafruit/Adafruit_SSD1306) — OLED display library
 - [Leaflet.js](https://leafletjs.com/) — Open-source interactive map library
 - [OpenStreetMap](https://www.openstreetmap.org/) — Free map tile provider
+- [OSRM](http://project-osrm.org/) — Open Source Routing Machine (road route engine)
 - [Flask](https://flask.palletsprojects.com/) — Lightweight Python web framework
 
 ---
@@ -345,7 +402,6 @@ MIT License — Free to use, modify, and distribute with attribution.
 ---
 
 <div align="center">
-
 
 <br/>
 
