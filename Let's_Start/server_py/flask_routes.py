@@ -1,22 +1,22 @@
-import serial
-import serial.tools.list_ports
-import threading
-import requests
-import math
-from flask import Flask, render_template_string, jsonify
+"""
+flask_routes.py  —  All Flask route handlers for the LoRa Tracker web UI.
 
-app = Flask(__name__)
+Register with:
+    from flask_routes import register_routes
+    register_routes(app, router, receiver_lat, receiver_lng)
+"""
 
-latest_data  = {"lat": "", "lng": "", "msg": "Waiting for LoRa data...", "rssi": "N/A"}
-gps_history  = []          # stores all past TX coordinates
-MAX_HISTORY  = 500         # keep last 500 points
+import logging
+from flask import Blueprint, jsonify, render_template_string
+from serial_reader import latest_data, gps_history
 
-# ---- SET YOUR RECEIVER FIXED LOCATION HERE ----
-RECEIVER_LAT = 17.087741     # example: Hyderabad
-RECEIVER_LNG = 82.068771
-# ------------------------------------------------
+log = logging.getLogger(__name__)
 
-HTML = """
+# ──────────────────────────────────────────────────────────────────────────────
+#  HTML template (self-contained; no Jinja template files needed)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_HTML = """
 <!DOCTYPE html>
 <html>
 <head>
@@ -42,9 +42,9 @@ HTML = """
                   font-size:12px; cursor:pointer; background:white; color:#555;
                   transition:all .2s; }
     .toggle-btn.active { color:white; border-color:transparent; }
-    .btn-road.active    { background:#1D9E75; }
-    .btn-straight.active{ background:#E08020; }
-    .btn-history.active { background:#378ADD; }
+    .btn-road.active     { background:#1D9E75; }
+    .btn-straight.active { background:#E08020; }
+    .btn-history.active  { background:#378ADD; }
     .controls-label { font-size:12px; color:#888; margin-right:4px; }
 
     .cards { display:flex; gap:10px; padding:12px 20px; flex-wrap:wrap; background:#f8f8f8; }
@@ -54,8 +54,8 @@ HTML = """
 
     .route-panel { background:white; margin:12px 20px; border-radius:10px; padding:16px 20px; }
     .route-panel h3 { font-size:14px; font-weight:500; margin-bottom:10px; color:#333; }
-    .rstat { display:inline-block; margin-right:24px; font-size:13px; color:#555; }
-    .rstat b { color:#1D9E75; }
+    .rstat      { display:inline-block; margin-right:24px; font-size:13px; color:#555; }
+    .rstat b    { color:#1D9E75; }
     .rstat-line { display:inline-block; margin-right:24px; font-size:13px; color:#555; }
     .rstat-line b { color:#E08020; }
     .steps-list { margin-top:10px; max-height:130px; overflow-y:auto;
@@ -66,11 +66,15 @@ HTML = """
 
     .legend { display:flex; gap:20px; padding:8px 20px 14px; flex-wrap:wrap; }
     .leg-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#555; }
-    .leg-dot { width:12px; height:12px; border-radius:50%; border:2px solid white;
-               box-shadow:0 0 0 1px #ccc; }
-    .leg-line { width:22px; height:3px; border-radius:2px; }
+    .leg-dot    { width:12px; height:12px; border-radius:50%; border:2px solid white;
+                  box-shadow:0 0 0 1px #ccc; }
+    .leg-line   { width:22px; height:3px; border-radius:2px; }
     .leg-dashed { width:22px; border-top:2.5px dashed #E08020; }
     .leg-dotted { width:22px; border-top:3px dotted #378ADD; }
+
+    .offline-badge { font-size:11px; background:#e8f5e9; color:#2e7d32;
+                     border:1px solid #a5d6a7; border-radius:12px;
+                     padding:3px 10px; margin-left:8px; }
   </style>
 </head>
 <body>
@@ -78,6 +82,7 @@ HTML = """
 <div class="topbar">
   <div class="dot"></div>
   <h2>LoRa Long Distance Tracker — Live</h2>
+  <span class="offline-badge">Offline routing (Dijkstra)</span>
   <span style="font-size:12px;color:#888" id="last-update">Waiting...</span>
 </div>
 
@@ -107,7 +112,7 @@ HTML = """
   <span class="rstat">Drive time: <b id="r-time">--</b></span>
   <span class="rstat-line">Straight line: <b id="r-line">--</b></span>
   <ul class="steps-list" id="r-steps">
-    <li>Waiting for GPS data to calculate route...</li>
+    <li>Waiting for GPS data to calculate route…</li>
   </ul>
   <div class="history-info" id="hist-info">GPS track history: 0 points recorded</div>
 </div>
@@ -115,15 +120,17 @@ HTML = """
 <div class="legend">
   <div class="leg-item"><div class="leg-dot" style="background:#e74c3c"></div> Transmitter (live)</div>
   <div class="leg-item"><div class="leg-dot" style="background:#3498db"></div> Receiver (fixed)</div>
-  <div class="leg-item"><div class="leg-line" style="background:#1D9E75"></div> Road route (OSRM)</div>
+  <div class="leg-item"><div class="leg-line" style="background:#1D9E75"></div> Road route (offline)</div>
   <div class="leg-item"><div class="leg-dashed"></div> Straight line</div>
   <div class="leg-item"><div class="leg-dotted"></div> GPS track history</div>
 </div>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
+var RX_LAT = {{ rx_lat }};
+var RX_LNG = {{ rx_lng }};
 
-var map = L.map('map').setView([{{ cx }}, {{ cy }}], {{ zoom }});
+var map = L.map('map').setView([RX_LAT, RX_LNG], 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   {attribution:'OpenStreetMap', maxZoom:19}).addTo(map);
 
@@ -135,13 +142,14 @@ var rxIcon = L.divIcon({ className:'',
   html:'<div style="background:#3498db;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
   iconSize:[14,14], iconAnchor:[7,7] });
 
-var rxMarker = L.marker([{{ rx_lat }}, {{ rx_lng }}], {icon: rxIcon})
-  .addTo(map).bindPopup('<b>Receiver (fixed)</b><br>Lat: {{ rx_lat }}<br>Lng: {{ rx_lng }}');
+var rxMarker = L.marker([RX_LAT, RX_LNG], {icon: rxIcon})
+  .addTo(map)
+  .bindPopup('<b>Receiver (fixed)</b><br>Lat: ' + RX_LAT + '<br>Lng: ' + RX_LNG);
 
-var txMarker   = null;
-var roadLayer  = null;
-var lineLayer  = null;
-var histLayer  = null;
+var txMarker  = null;
+var roadLayer = null;
+var lineLayer = null;
+var histLayer = null;
 
 var showRoad     = true;
 var showStraight = true;
@@ -198,10 +206,10 @@ function recalcRoute() {
 
 function updateStraightLine(txLat, txLng) {
   if (lineLayer) map.removeLayer(lineLayer);
-  var dist = haversineKm(txLat, txLng, {{ rx_lat }}, {{ rx_lng }});
+  var dist = haversineKm(txLat, txLng, RX_LAT, RX_LNG);
   var distStr = dist >= 1 ? dist.toFixed(1) + ' km' : (dist*1000).toFixed(0) + ' m';
   document.getElementById('r-line').textContent = distStr;
-  lineLayer = L.polyline([[txLat, txLng],[{{ rx_lat }}, {{ rx_lng }}]],
+  lineLayer = L.polyline([[txLat, txLng],[RX_LAT, RX_LNG]],
     {color:'#E08020', weight:2.5, dashArray:'10,6', opacity:.8});
   if (showStraight) lineLayer.addTo(map);
 }
@@ -223,184 +231,80 @@ function update() {
     document.getElementById('c-lat').textContent  = d.lat  || '--';
     document.getElementById('c-lng').textContent  = d.lng  || '--';
     document.getElementById('c-msg').textContent  = d.msg;
-    document.getElementById('c-rssi').textContent = d.rssi !== 'N/A' ? d.rssi + ' dBm' : '--';
+    document.getElementById('c-rssi').textContent =
+      d.rssi !== 'N/A' && d.rssi !== '' ? d.rssi + ' dBm' : '--';
     document.getElementById('last-update').textContent =
       'Last update: ' + new Date().toLocaleTimeString();
 
     if (d.lat && d.lng) {
       var lat = parseFloat(d.lat), lng = parseFloat(d.lng);
-      var latlng = [lat, lng];
       if (!txMarker) {
-        txMarker = L.marker(latlng, {icon: txIcon}).addTo(map)
+        txMarker = L.marker([lat, lng], {icon: txIcon}).addTo(map)
           .bindPopup('<b>Transmitter (live GPS)</b><br>' + d.msg);
-        map.setView(latlng, {{ zoom }});
+        map.setView([lat, lng], 10);
       } else {
-        txMarker.setLatLng(latlng).setPopupContent('<b>Transmitter (live GPS)</b><br>' + d.msg);
+        txMarker.setLatLng([lat, lng])
+                .setPopupContent('<b>Transmitter (live GPS)</b><br>' + d.msg);
       }
       updateStraightLine(lat, lng);
     }
   });
 
-  fetch('/history').then(r => r.json()).then(d => {
-    updateHistory(d.points);
-  });
+  fetch('/history').then(r => r.json()).then(d => updateHistory(d.points));
 }
 
 setInterval(update, 3000);
 setInterval(recalcRoute, 15000);
 update();
 setTimeout(recalcRoute, 3000);
-
 </script>
 </body>
 </html>
 """
 
-@app.route('/')
-def index():
-    cx  = (RECEIVER_LAT + 20) / 2
-    cy  = (RECEIVER_LNG + 80) / 2
-    return render_template_string(HTML,
-        rx_lat=RECEIVER_LAT, rx_lng=RECEIVER_LNG,
-        cx=cx, cy=cy, zoom=6)
 
-@app.route('/data')
-def data():
-    return __import__('flask').jsonify(latest_data)
+# ──────────────────────────────────────────────────────────────────────────────
 
-@app.route('/history')
-def history():
-    return __import__('flask').jsonify({"points": gps_history})
+def register_routes(app, router, receiver_lat: float, receiver_lng: float) -> None:
+    """
+    Attach all URL routes to *app*.
 
-@app.route('/route')
-def get_route():
-    if not latest_data['lat'] or not latest_data['lng']:
-        return __import__('flask').jsonify({"error": "No GPS data yet"})
-    try:
-        tx_lat = float(latest_data['lat'])
-        tx_lng = float(latest_data['lng'])
+    Parameters
+    ----------
+    app          : Flask application instance
+    router       : OfflineRouter instance from router.py
+    receiver_lat : fixed latitude of the LoRa receiver
+    receiver_lng : fixed longitude of the LoRa receiver
+    """
 
-        url = (
-            f"http://router.project-osrm.org/route/v1/driving/"
-            f"{tx_lng},{tx_lat};{RECEIVER_LNG},{RECEIVER_LAT}"
-            f"?overview=full&geometries=geojson&steps=true"
+    @app.route("/")
+    def index():
+        return render_template_string(
+            _HTML,
+            rx_lat=receiver_lat,
+            rx_lng=receiver_lng,
         )
-        resp   = requests.get(url, timeout=15)
-        result = resp.json()
 
-        if result.get('code') != 'Ok':
-            return __import__('flask').jsonify({"error": "OSRM error: " + result.get('code','unknown')})
+    @app.route("/data")
+    def data():
+        return jsonify(latest_data)
 
-        route  = result['routes'][0]
-        dist_m = route['distance']
-        dur_s  = route['duration']
+    @app.route("/history")
+    def history():
+        return jsonify({"points": gps_history})
 
-        dist_str = f"{dist_m/1000:.1f} km" if dist_m >= 1000 else f"{dist_m:.0f} m"
-
-        if dur_s >= 3600:
-            dur_str = f"{int(dur_s//3600)}h {int((dur_s%3600)//60)}m"
-        elif dur_s >= 60:
-            dur_str = f"{int(dur_s//60)} min"
-        else:
-            dur_str = f"{int(dur_s)} sec"
-
-        steps = []
-        for leg in route['legs']:
-            for step in leg['steps']:
-                m    = step.get('maneuver', {})
-                typ  = m.get('type', '')
-                mod  = m.get('modifier', '')
-                name = step.get('name', '')
-                dist = step.get('distance', 0)
-                if typ == 'depart':
-                    txt = f"Start on {name}" if name else "Depart"
-                elif typ == 'arrive':
-                    txt = "Arrive at destination"
-                elif mod:
-                    txt = f"Turn {mod}" + (f" onto {name}" if name else "")
-                else:
-                    txt = typ.capitalize() + (f" on {name}" if name else "")
-                if dist > 0:
-                    d_str = f"{dist/1000:.1f} km" if dist >= 1000 else f"{dist:.0f} m"
-                    txt  += f" ({d_str})"
-                steps.append(txt)
-
-        coords   = route['geometry']['coordinates']
-        geometry = [[c[1], c[0]] for c in coords]
-
-        return __import__('flask').jsonify({
-            "distance": dist_str,
-            "duration": dur_str,
-            "steps":    steps,
-            "geometry": geometry
-        })
-
-    except requests.exceptions.Timeout:
-        return __import__('flask').jsonify({"error": "OSRM timeout — check internet connection"})
-    except Exception as e:
-        return __import__('flask').jsonify({"error": str(e)})
-
-
-def is_valid(line):
-    try:
-        c = line[5:]
-        if ",RSSI:" in c: c = c.split(",RSSI:")[0]
-        p = c.split(",", 2)
-        if len(p) < 3: return False
-        lat, lng = float(p[0]), float(p[1])
-        return -90 <= lat <= 90 and -180 <= lng <= 180 and len(p[2].strip()) > 0
-    except:
-        return False
-
-def read_serial():
-    import time
-    PORT = 'COM11'
-    ports = serial.tools.list_ports.comports()
-    for p in ports:
-        if any(x in p.description for x in ['Arduino','CH340','USB Serial']):
-            PORT = p.device; break
-
-    print(f"Connecting to {PORT}...")
-    while True:
+    @app.route("/route")
+    def get_route():
+        if not latest_data["lat"] or not latest_data["lng"]:
+            return jsonify({"error": "No GPS data yet"})
         try:
-            ser = serial.Serial(PORT, 9600, timeout=2)
-            print(f"Connected to {PORT} — waiting for data...")
-            while True:
-                raw  = ser.readline()
-                line = raw.decode('utf-8', errors='ignore').strip()
-                if not line.startswith("DATA:"): continue
-                if not is_valid(line):
-                    print(f"  Skipped (corrupted): {line}"); continue
-
-                c = line[5:]
-                rssi = "N/A"
-                if ",RSSI:" in c:
-                    sp = c.split(",RSSI:"); rssi = sp[1]; c = sp[0]
-                p = c.split(",", 2)
-                lat = p[0].strip()
-                lng = p[1].strip()
-                msg = p[2].strip()
-
-                latest_data.update({'lat':lat,'lng':lng,'msg':msg,'rssi':rssi})
-
-                # Add to GPS track history
-                gps_history.append([float(lat), float(lng)])
-                if len(gps_history) > MAX_HISTORY:
-                    gps_history.pop(0)
-
-                print(f"  lat={lat} lng={lng} | history={len(gps_history)} pts")
-
-        except serial.SerialException as e:
-            print(f"Serial error: {e} — retry in 4s")
-            time.sleep(4)
-
-t = threading.Thread(target=read_serial, daemon=True)
-t.start()
-
-if __name__ == '__main__':
-    print("="*50)
-    print("  LoRa Long Distance Tracker")
-    print("  Open http://localhost:5000")
-    print("="*50)
-    __import__('flask').Flask(__name__)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+            result = router.route(
+                float(latest_data["lat"]),
+                float(latest_data["lng"]),
+                receiver_lat,
+                receiver_lng,
+            )
+            return jsonify(result)
+        except Exception as exc:
+            log.exception("Route endpoint error")
+            return jsonify({"error": str(exc)})

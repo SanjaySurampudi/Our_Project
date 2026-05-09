@@ -1,0 +1,5 @@
+flask>=3.0
+pyserial>=3.5
+osmnx>=1.9
+networkx>=3.3
+requests>=2.31      # kept for any optional future use; not used for routing
