@@ -17,6 +17,8 @@
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=1D9E75&height=100&section=header&text=LoRa+GPS+Tracker&fontSize=35&fontColor=white&animation=fadeIn&fontAlignY=65" width="100%"/>
 
+<br/>
+
 > **Transmit GPS coordinates and text messages wirelessly over 2–5 km**
 > No internet. No SIM card. No infrastructure needed.
 > Receiver plots the **exact road route** using offline Dijkstra on an OSM graph.
@@ -30,23 +32,13 @@
 
 ---
 
-<div align="center">
-
-## 🌟 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=SanjaySurampudi/lora-gps-tracker&type=Date)](https://star-history.com/#SanjaySurampudi/lora-gps-tracker&Date)
-
-</div>
-
----
-
 ## 🗺️ Live Demo
 
 <div align="center">
 
 | 🌐 Web Dashboard | 📟 OLED Display |
 |:---:|:---:|
-| ![Website](assets/website_screenshot.png) | ![OLED](assets/oled_display.png) |
+| ![Website](website_screenshot1.jpeg) | ![OLED](oled_display.jpeg) |
 | Real-time map with exact road route + GPS track history | Coordinates + Message + RSSI (dBm) |
 
 </div>
@@ -100,7 +92,7 @@
 ╚══════════════════════════════╝                ║                │ USB Serial  ║
                                                 ║                ▼             ║
                                                 ║  ┌─────────────────────────┐ ║
-                                                ║  │    Python Flask Server   │ ║
+                                                ║  │    Python Flask Server  │ ║
                                                 ║  │                         │ ║
                                                 ║  │  serial_reader.py       │ ║
                                                 ║  │  ├─ reads DATA: packets │ ║
@@ -454,7 +446,9 @@ MIT License — Free to use, modify, and distribute with attribution.
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=1D9E75&height=100&section=footer&animation=fadeIn" width="100%"/>
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=16&pause=1000&color=1D9E75&center=true&vCenter=true&width=500&lines=Thanks+for+checking+out+this+project!;Give+it+a+⭐+if+it+helped+you!;Built+at+Aditya+University%2C+Surampalem" alt="Typing SVG" />
+<br/>
+
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=16&pause=1000&color=1D9E75&center=true&vCenter=true&width=500&lines=Thanks+for+checking+out+this+project!;Give+it+a+%E2%AD%90+if+it+helped+you!;Built+at+Aditya+University%2C+Surampalem" alt="Typing SVG" />
 
 <br/>
 
@@ -464,7 +458,7 @@ MIT License — Free to use, modify, and distribute with attribution.
 
 *Built with ❤️, Arduino UNO, LoRa SX1278, GPS NEO-6M, and a lot of debugging*
 
----
+<br/>
 
 ### ⭐ If this project helped you, please give it a star on GitHub! ⭐
 

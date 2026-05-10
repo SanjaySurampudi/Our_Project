@@ -44,7 +44,7 @@ void loop() {
     if (Serial.available() > 0) {
       textMessage = Serial.readString();
     } else {
-      textMessage = "Hello Traine!";   // Default message
+      textMessage = "Hello Trainee!";   // Default message
     }
 
     // Build packet in format: LAT,LNG,TEXT
@@ -56,6 +56,9 @@ void loop() {
     LoRa.beginPacket();
     LoRa.print(packet);
     LoRa.endPacket();
+  }
+  else{
+    Serial.println("waiting for gps data");
   }
   delay(2000); // Send every 2 seconds
 }
