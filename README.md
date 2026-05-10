@@ -17,10 +17,12 @@
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=1D9E75&height=100&section=header&text=LoRa+GPS+Tracker&fontSize=35&fontColor=white&animation=fadeIn&fontAlignY=65" width="100%"/>
 
+<br/>
+
 > **Transmit GPS coordinates and text messages wirelessly over 2–5 km**
 > No internet. No SIM card. No infrastructure needed.
 > Receiver plots the **exact road route** using offline Dijkstra on an OSM graph.
-> Built by a B.Tech ECE project at **Aditya University, Surampalem** 🎓
+> Built as a B.Tech ECE project at **Aditya University, Surampalem** 🎓
 
 <br/>
 
@@ -29,10 +31,6 @@
 </div>
 
 ---
-
-<div align="center">
-
-
 
 ## 🗺️ Live Demo
 
@@ -83,7 +81,7 @@
 ║       ▼                      ║                ║                │ I2C         ║
 ║  ┌───────────┐               ║                ║       ┌────────────────┐     ║
 ║  │  Arduino  │               ║   433 MHz RF   ║       │  Arduino UNO   │     ║
-║  │    UNO    │═══════════════════════════════════════►│   (Receiver)   │     ║
+║  │    UNO    │════════════════════════════════════════►│   (Receiver)   │     ║
 ║  └───────────┘               ║                ║       └────────────────┘     ║
 ║       │ SPI                  ║                ║                │ SPI         ║
 ║       ▼                      ║                ║                ▼             ║
@@ -448,7 +446,9 @@ MIT License — Free to use, modify, and distribute with attribution.
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=1D9E75&height=100&section=footer&animation=fadeIn" width="100%"/>
 
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=16&pause=1000&color=1D9E75&center=true&vCenter=true&width=500&lines=Thanks+for+checking+out+this+project!;Give+it+a+⭐+if+it+helped+you!;Built+at+Aditya+University%2C+Surampalem" alt="Typing SVG" />
+<br/>
+
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=16&pause=1000&color=1D9E75&center=true&vCenter=true&width=500&lines=Thanks+for+checking+out+this+project!;Give+it+a+%E2%AD%90+if+it+helped+you!;Built+at+Aditya+University%2C+Surampalem" alt="Typing SVG" />
 
 <br/>
 
@@ -458,7 +458,7 @@ MIT License — Free to use, modify, and distribute with attribution.
 
 *Built with ❤️, Arduino UNO, LoRa SX1278, GPS NEO-6M, and a lot of debugging*
 
----
+<br/>
 
 ### ⭐ If this project helped you, please give it a star on GitHub! ⭐
 
