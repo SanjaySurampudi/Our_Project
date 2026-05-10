@@ -20,7 +20,7 @@
 > **Transmit GPS coordinates and text messages wirelessly over 2–5 km**
 > No internet. No SIM card. No infrastructure needed.
 > Receiver plots the **exact road route** using offline Dijkstra on an OSM graph.
-> Built as a B.Tech ECE project at **Aditya University, Surampalem** 🎓
+> Built by a B.Tech ECE project at **Aditya University, Surampalem** 🎓
 
 <br/>
 
