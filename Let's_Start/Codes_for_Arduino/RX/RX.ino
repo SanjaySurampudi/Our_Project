@@ -68,7 +68,7 @@ void loop() {
   if (packetSize == 0) return;    // Nothing received yet
 
   // Read the incoming bytes into a String
-  String received = "";
+  String received = "Waiting For GPS Signal";
   while (LoRa.available()) {
     received += (char)LoRa.read();
   }
