@@ -32,13 +32,7 @@
 
 <div align="center">
 
-## 🌟 Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=SanjaySurampudi/lora-gps-tracker&type=Date)](https://star-history.com/#SanjaySurampudi/lora-gps-tracker&Date)
-
-</div>
-
----
 
 ## 🗺️ Live Demo
 
