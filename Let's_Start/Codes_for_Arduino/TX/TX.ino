@@ -44,7 +44,7 @@ void loop() {
     if (Serial.available() > 0) {
       textMessage = Serial.readString();
     } else {
-      textMessage = "Hello Traine!";   // Default message
+      textMessage = "Hello Trainee!";   // Default message
     }
 
     // Build packet in format: LAT,LNG,TEXT
