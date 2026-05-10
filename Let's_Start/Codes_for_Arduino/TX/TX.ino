@@ -57,5 +57,8 @@ void loop() {
     LoRa.print(packet);
     LoRa.endPacket();
   }
+  else{
+    Serial.println("waiting for gps data");
+  }
   delay(2000); // Send every 2 seconds
 }
