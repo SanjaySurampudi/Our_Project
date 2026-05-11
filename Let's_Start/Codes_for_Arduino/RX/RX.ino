@@ -1,15 +1,11 @@
 /*
  * rx.ino — LoRa Receiver with OLED display
- *
  * Receives GPS coordinates + text message via LoRa and displays them
  * on a 128x64 SSD1306 OLED. Also forwards data via USB serial to the
  * Python server in this format:
- *
  *     DATA:<lat>,<lng>,<message>,RSSI:<value>
- *
  * Example:
  *     DATA:17.385000,78.486700,Hello Trainee!,RSSI:-87
- *
  * Libraries:
  *   LoRa             by Sandeep Mistry
  *   Adafruit GFX
