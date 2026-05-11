@@ -1,64 +1,82 @@
-#include <SPI.h>                 // SPI library for LoRa communication
-#include <LoRa.h>                // LoRa library for SX1278/SX1276 modules
-#include <SoftwareSerial.h>      // Software serial for GPS module
-#include <TinyGPS++.h>           // TinyGPS++ library for parsing GPS data
+/*
+ * tx.ino — LoRa Transmitter with GPS
+ *
+ * Sends GPS coordinates + text message via LoRa every 2 seconds.
+ *
+ * Packet format:  lat,lng,message
+ *
+ * Libraries:
+ *   LoRa            by Sandeep Mistry
+ *   TinyGPSPlus     by Mikal Hart
+ *   SoftwareSerial  (built-in)
+ */
+
+#include <SPI.h>
+#include <LoRa.h>
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
 
 // GPS module connected via SoftwareSerial
 // Pin 4 = RX (receives data from GPS TX)
 // Pin 3 = TX (sends data to GPS RX)
 SoftwareSerial gpsSerial(4, 3);
-TinyGPSPlus gps;                 // GPS object
+TinyGPSPlus gps;
 
 // LoRa module pin definitions
-#define LORA_SS   10             // Chip Select (NSS)
-#define LORA_RST  9              // Reset pin
-#define LORA_DIO0 2              // Interrupt pin (DIO0)
+#define LORA_SS   10
+#define LORA_RST   9
+#define LORA_DIO0  2
 
-String textMessage;              // Message to send along with GPS data
+String textMessage = "Hello Trainee!";   // Default message (set once)
 
 void setup() {
-  Serial.begin(9600);            // Start serial monitor
-  gpsSerial.begin(9600);         // Start GPS serial communication
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
 
-  // Initialize LoRa with defined pins
   LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
-  if (!LoRa.begin(433E6)) {      // Start LoRa at 433 MHz
+  if (!LoRa.begin(433E6)) {
     Serial.println("LoRa init failed!");
-    while (1);                   // Halt if initialization fails
+    while (1);
   }
-  Serial.println("LoRa TX ready"); // Indicate transmitter is ready
+
+  Serial.println("LoRa TX ready");
 }
 
 void loop() {
-  // Continuously feed GPS data to TinyGPS++ parser
+  // Feed GPS data to TinyGPS++ parser
   while (gpsSerial.available()) {
     gps.encode(gpsSerial.read());
   }
 
-  // If GPS location is updated successfully
-  if (gps.location.isUpdated()) {
-    double lat = gps.location.lat();   // Get latitude
-    double lng = gps.location.lng();   // Get longitude
-
-    // Read message from Serial Monitor if available
-    if (Serial.available() > 0) {
-      textMessage = Serial.readString();
-    } else {
-      textMessage = "Hello Trainee!";   // Default message
+  // Read new message from Serial Monitor if available (non-blocking)
+  if (Serial.available() > 0) {
+    String incoming = Serial.readStringUntil('\n');
+    incoming.trim();
+    incoming.replace(',', ' ');   // protect CSV parser on RX side
+    if (incoming.length() > 0) {
+      textMessage = incoming;
+      Serial.println("Message updated: " + textMessage);
     }
-
-    // Build packet in format: LAT,LNG,TEXT
-    String packet = String(lat, 6) + "," + String(lng, 6) + "," + textMessage;
-
-    Serial.println("Sending: " + packet); // Print packet to Serial
-
-    // Send packet via LoRa
-    LoRa.beginPacket();
-    LoRa.print(packet);
-    LoRa.endPacket();
   }
-  else{
-    Serial.println("waiting for gps data");
+
+  // Only transmit when GPS has a valid fix
+  if (!gps.location.isValid()) {
+    Serial.println("Waiting for GPS fix...");
+    delay(2000);
+    return;
   }
-  delay(2000); // Send every 2 seconds
+
+  double lat = gps.location.lat();
+  double lng = gps.location.lng();
+
+  // Build packet: LAT,LNG,MESSAGE
+  String packet = String(lat, 6) + "," + String(lng, 6) + "," + textMessage;
+  Serial.println("Sending: " + packet);
+
+  // Send via LoRa
+  LoRa.beginPacket();
+  LoRa.print(packet);
+  LoRa.endPacket();
+
+  delay(2000);   // Send every 2 seconds
 }
