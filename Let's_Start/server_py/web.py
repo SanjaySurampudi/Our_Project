@@ -1,438 +1,406 @@
-"""
-LoRa Long Distance Tracker — Flask Server
+# 📡 LoRa Long-Range Offline-to-Online Communication & GPS Tracking System
 
-Reads LoRa packets from the receiver Arduino over USB serial and renders
-a live web dashboard with map, road route, straight-line distance, and
-GPS track history.
+> A two-node LoRa-based GPS tracking and messaging system that operates **100% offline** over an RF link and optionally enriches data on a live web dashboard when internet is available.
 
-Dependencies:
-    pip install pyserial flask requests
+---
 
-Run:
-    python server.py
-    Open http://localhost:5000
-"""
+## 📋 Table of Contents
 
-import threading
-import time
-import serial
-import serial.tools.list_ports
-import requests
-from flask import Flask, render_template_string, jsonify
+1. [Description](#description)
+2. [Requirements](#requirements)
+3. [Problem Statement](#problem-statement)
+4. [Proposed Solution](#proposed-solution)
+5. [Technologies Used](#technologies-used)
+6. [System Architecture](#system-architecture)
+7. [In-Scope](#in-scope)
+8. [Out-of-Scope](#out-of-scope)
+9. [Project Structure](#project-structure)
+10. [Getting Started](#getting-started)
+11. [Usage](#usage)
+12. [Future Enhancements](#future-enhancements)
+13. [Conclusion](#conclusion)
 
-app = Flask(__name__)
+---
 
-# Shared state (protected by data_lock)
-data_lock = threading.Lock()
-latest_data = {"lat": "", "lng": "", "msg": "Waiting for LoRa data...", "rssi": "N/A"}
-gps_history = []          # stores past TX coordinates
-MAX_HISTORY = 500         # keep last 500 points
+## 📖 Description
 
-# ---- SET YOUR RECEIVER FIXED LOCATION HERE ----
-RECEIVER_LAT = 17.087741
-RECEIVER_LNG = 82.068771
-# ------------------------------------------------
+This project implements a **long-range, offline-capable communication and GPS tracking system** using LoRa (Long Range) radio technology operating at **433 MHz**.
 
-HTML = """
-<!DOCTYPE html>
-<html>
-<head>
-  <title>LoRa Long Distance Tracker</title>
-  <meta charset="utf-8">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; background: #f0f2f5; }
+- The **transmitter unit** functions completely offline in remote areas without any internet or cellular connectivity. It captures live GPS coordinates via a NEO-6M module and broadcasts them along with a text message over LoRa radio waves.
+- The **receiver unit**, located up to several kilometres away, captures these packets through its own LoRa module and displays the data on a local OLED screen *(offline mode)*.
+- When internet is available at the receiver side, the same data is simultaneously pushed to a **Flask-based web dashboard** that:
+  - Plots the transmitter's live position on an OpenStreetMap interface
+  - Draws the road route via OSRM
+  - Calculates straight-line (Haversine) distance
+  - Maintains a GPS track history of up to **500 points**
+  - Displays LoRa signal strength (RSSI)
 
-    .topbar { display:flex; align-items:center; gap:10px; padding:14px 20px;
-              background:white; border-bottom:1px solid #eee; }
-    .topbar h2 { font-size:17px; font-weight:500; color:#222; flex:1; }
-    .dot { width:10px; height:10px; background:#2ecc71; border-radius:50%;
-           animation:pulse 1.5s infinite; flex-shrink:0; }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+> **The communication link between transmitter and receiver is 100% offline (purely RF-based).** Internet is optional and used only for map visualisation enrichment at the receiver end.
 
-    #map { height:500px; }
+---
 
-    .controls { display:flex; gap:8px; padding:12px 20px; background:white;
-                border-bottom:1px solid #eee; flex-wrap:wrap; align-items:center; }
-    .toggle-btn { padding:6px 14px; border-radius:20px; border:1.5px solid #ddd;
-                  font-size:12px; cursor:pointer; background:white; color:#555;
-                  transition:all .2s; }
-    .toggle-btn.active { color:white; border-color:transparent; }
-    .btn-road.active    { background:#1D9E75; }
-    .btn-straight.active{ background:#E08020; }
-    .btn-history.active { background:#378ADD; }
-    .controls-label { font-size:12px; color:#888; margin-right:4px; }
+## 🛠️ Requirements
 
-    .cards { display:flex; gap:10px; padding:12px 20px; flex-wrap:wrap; background:#f8f8f8; }
-    .card { background:white; padding:12px 16px; border-radius:10px; min-width:130px; }
-    .card .lbl { font-size:11px; color:#888; text-transform:uppercase; margin-bottom:3px; }
-    .card .val { font-size:16px; font-weight:500; color:#222; }
+### Hardware Requirements
 
-    .route-panel { background:white; margin:12px 20px; border-radius:10px; padding:16px 20px; }
-    .route-panel h3 { font-size:14px; font-weight:500; margin-bottom:10px; color:#333; }
-    .rstat { display:inline-block; margin-right:24px; font-size:13px; color:#555; }
-    .rstat b { color:#1D9E75; }
-    .rstat-line { display:inline-block; margin-right:24px; font-size:13px; color:#555; }
-    .rstat-line b { color:#E08020; }
-    .steps-list { margin-top:10px; max-height:130px; overflow-y:auto;
-                  border-top:1px solid #eee; padding-top:8px; }
-    .steps-list li { font-size:12px; color:#666; list-style:none; padding:3px 0;
-                     border-bottom:1px solid #f5f5f5; }
-    .history-info { font-size:12px; color:#888; margin-top:8px; }
+| Component | Quantity | Notes |
+|-----------|----------|-------|
+| Arduino Uno | ×2 | One for TX, one for RX |
+| LoRa SX1278 Module | ×2 | 433 MHz transceiver |
+| NEO-6M GPS Module | ×1 | Transmitter side only |
+| SSD1306 OLED Display (128×64, I²C) | ×1 | Receiver side |
+| 433 MHz Antennas | ×2 | Tuned for 433 MHz |
+| Jumper wires, breadboards | — | — |
+| 5V power supply / battery pack | — | — |
+| USB cable | ×1 | Connecting RX Arduino to host PC |
 
-    .legend { display:flex; gap:20px; padding:8px 20px 14px; flex-wrap:wrap; }
-    .leg-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#555; }
-    .leg-dot { width:12px; height:12px; border-radius:50%; border:2px solid white;
-               box-shadow:0 0 0 1px #ccc; }
-    .leg-line { width:22px; height:3px; border-radius:2px; }
-    .leg-dashed { width:22px; border-top:2.5px dashed #E08020; }
-    .leg-dotted { width:22px; border-top:3px dotted #378ADD; }
-  </style>
-</head>
-<body>
+### Software Requirements
 
-<div class="topbar">
-  <div class="dot"></div>
-  <h2>LoRa Long Distance Tracker — Live</h2>
-  <span style="font-size:12px;color:#888" id="last-update">Waiting...</span>
+- **Arduino IDE** with the following libraries:
+  - `LoRa`
+  - `TinyGPS++`
+  - `SoftwareSerial`
+  - `Adafruit_GFX`
+  - `Adafruit_SSD1306`
+  - `Wire`
+  - `SPI`
+- **Python 3.x** with packages:
+  - `pyserial`
+  - `flask`
+  - `requests`
+- **Web Browser** — Chrome / Firefox / Edge (with Leaflet.js support)
+- **Internet** *(optional)* — only at receiver host for map tiles & OSRM routing
+- OpenStreetMap tile service & OSRM public routing API
+
+### Functional Requirements
+
+- Offline RF communication between TX and RX
+- Real-time GPS acquisition and transmission every **2 seconds**
+- Reliable packet parsing with corruption filtering
+- Dual-mode receiver output: OLED display + Web Dashboard
+- RSSI logging for signal-strength analysis
+
+---
+
+## ❗ Problem Statement
+
+In remote, rural, disaster-hit, or infrastructure-poor regions, conventional communication systems such as GSM, 4G/5G, and Wi-Fi are either unavailable or unreliable. This creates critical gaps in:
+
+- **Tracking personnel or assets** (trekkers, soldiers, livestock, vehicles, drones) in cellular dead zones.
+- **Sending short emergency / status messages** when internet and mobile networks fail (floods, earthquakes, forest fires).
+- **Affordable long-range telemetry** — existing satellite-based solutions (GPS trackers with GSM/satellite uplink) are expensive and carry recurring costs.
+- **Lack of an offline backbone** between two distant points where neither side has internet access at the link itself.
+- **No flexible visualisation** — many off-the-shelf trackers store data locally and lack a live map with route, distance, and signal-quality feedback.
+
+> A low-cost, license-free (ISM-band 433 MHz), low-power, long-range communication system is needed that operates **independently of any internet/cellular infrastructure**.
+
+---
+
+## 💡 Proposed Solution
+
+A two-node LoRa-based GPS tracking and messaging system with the following design:
+
+1. **Transmitter Node** — Arduino Uno reads live latitude/longitude from a NEO-6M GPS via SoftwareSerial, parses it using TinyGPS++, packages the coordinates with a text message into a CSV-style packet (`lat,lng,message`), and transmits it via the SX1278 LoRa module at 433 MHz every 2 seconds — **completely offline**.
+
+2. **Receiver Node** — Arduino Uno with an SX1278 LoRa module listens for incoming packets, captures the RSSI immediately on reception, displays parsed `lat/lng/message/RSSI` on a 0.96″ SSD1306 OLED, and forwards the packet over USB serial in the format:
+   ```
+   DATA:<lat>,<lng>,<msg>,RSSI:<value>
+   ```
+
+3. **Python–Flask Backend** — Runs on the host PC, reads the serial stream in a background thread, validates and parses packets, maintains GPS history (up to 500 points), and exposes `/data`, `/history`, and `/route` JSON endpoints.
+
+4. **Web Dashboard (Leaflet.js + OpenStreetMap)** — Shows the transmitter and receiver as markers, draws the road route via the OSRM public API, overlays a dashed Haversine straight-line, plots GPS track history, and refreshes every **3 seconds**.
+
+5. **Graceful Offline Fallback** — If the receiver host has no internet, the OLED still shows all data; the web dashboard simply omits map tiles and route info.
+
+---
+
+## 🔧 Technologies Used
+
+| Layer | Technologies |
+|-------|-------------|
+| Firmware | Arduino (C/C++), SPI, I²C, SoftwareSerial |
+| RF Communication | LoRa SX1278 — 433 MHz |
+| GPS | NEO-6M, TinyGPS++ |
+| Display | Adafruit GFX, Adafruit SSD1306 |
+| Backend | Python 3, Flask, PySerial, Threading |
+| Frontend | HTML5, CSS3, JavaScript, Leaflet.js |
+| Mapping | OpenStreetMap, OSRM Routing API |
+| Algorithms | Haversine Formula |
+| Data Format | CSV packets, JSON, REST API |
+
+---
+
+## 🏗️ System Architecture
+
+```
+┌──────────────────────── TRANSMITTER (Fully Offline) ────────────────────────┐
+│                                                                              │
+│   ┌──────────────┐   SoftSerial    ┌────────────────┐    SPI    ┌─────────┐ │
+│   │  NEO-6M GPS  │ ──────────────▶ │  Arduino Uno   │ ────────▶ │ SX1278  │ │
+│   │  (Satellites)│   9600 baud     │  (TinyGPS++)   │  10/9/2   │  LoRa   │ │
+│   └──────────────┘                 └────────────────┘           │ 433 MHz │ │
+│          ▲                                                       └────┬────┘ │
+│          │ GPS L1 signal                                              │      │
+└──────────┼──────────────────────────────────────────────────────────  │ ─────┘
+           │                                                            │
+           │                   RF LINK (Offline, up to several km)
+           │                                                            │
+┌──────────┼──────────────────────────── RECEIVER ─────────────────────│──────┐
+│          │                                                            ▼      │
+│   GPS Satellites (TX uses)                                  ┌──────────────┐ │
+│                                                              │   SX1278     │ │
+│                                                              │   LoRa RX    │ │
+│                                                              └──────┬───────┘ │
+│                                                            SPI │ 10/9/2       │
+│                                                                  ▼            │
+│   ┌─────────────┐   I²C    ┌──────────────────┐                              │
+│   │ OLED SSD1306│ ◀─────── │   Arduino Uno    │ ── USB Serial (9600) ───┐   │
+│   │  128×64     │  0x3C    │ (Parse + Display)│                          │   │
+│   └─────────────┘          └──────────────────┘                          │   │
+│   [Offline Mode]                                                          ▼   │
+│                                                              ┌──────────────────┐
+│                                                              │  Host PC         │
+│                                                              │  ┌────────────┐  │
+│                                                              │  │Python      │  │
+│                                                              │  │Flask Server│  │
+│                                                              │  │+ PySerial  │  │
+│                                                              │  └─────┬──────┘  │
+│                                                              │        │         │
+│                                                              │  /data /history  │
+│                                                              │       /route     │
+│                                                              │        │         │
+│                                                              │  ┌─────▼──────┐  │
+│                                                              │  │Leaflet Map │  │
+│                                                              │  │OSM + OSRM  │  │
+│                                                              │  └────────────┘  │
+│                                                              └──────────────────┘
+│                                                              [Online Mode]      │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data Flow:**
+```
+GPS Satellites → NEO-6M → Arduino TX → SX1278 TX
+  → (Offline RF 433 MHz)
+    → SX1278 RX → Arduino RX → {OLED Display}
+                              + {Serial → Python Flask → Web Dashboard}
+```
+
+---
+
+## ✅ In-Scope
+
+- Real-time GPS coordinate transmission from a moving/fixed transmitter unit
+- One-way short text messaging from TX to RX (default `"Hello Trainee!"` or custom via Serial input)
+- Fully offline RF communication using ISM band 433 MHz LoRa
+- Local visualisation on a 0.96″ OLED at the receiver (works without any internet)
+- Web-based live map with transmitter/receiver markers and live position updates
+- Road-route generation between TX and RX via OSRM
+- Haversine straight-line distance calculation
+- GPS track history rendering (last **500 points**)
+- RSSI (signal strength) display for link-quality monitoring
+- Automatic Arduino COM port detection on the Python server
+- Packet corruption filtering / validation on the server side
+- Auto-reconnect to serial port on disconnection
+
+---
+
+## 🚫 Out-of-Scope
+
+- Two-way / bi-directional communication (current design is TX → RX only)
+- Encryption / authentication of LoRa packets (data is sent in plain text)
+- Mesh networking, multi-node relaying, or LoRaWAN gateway operation
+- Cellular (GSM/4G/5G) or satellite uplinks at the transmitter side
+- Cloud database storage or long-term historical analytics
+- Mobile app (Android/iOS) interface
+- Indoor positioning where GPS signal is unavailable
+- Voice, image, or large file transfer (LoRa bandwidth is far too low)
+- Real-time collision avoidance between multiple transmitters on the same frequency
+- Regulatory licensing / spectrum-management beyond ISM band guidelines
+- Battery-life optimisation and low-power sleep modes
+- Weatherproof / ruggedised hardware enclosure design
+
+---
+
+## 📁 Project Structure
+
+```
+LoRa-GPS-Tracker/
+│
+├── transmitter/
+│   └── transmitter.ino          # Arduino TX — reads GPS, sends LoRa packets
+│
+├── receiver/
+│   └── receiver.ino             # Arduino RX — receives packets, drives OLED
+│
+├── server/
+│   └── server.py                # Python Flask server + PySerial reader
+│
+└── README.md
+```
+
+---
+
+## 🚀 Getting Started
+
+### 1. Wiring
+
+**Transmitter (Arduino Uno)**
+
+| SX1278 Pin | Arduino Pin |
+|-----------|-------------|
+| NSS / CS  | D10         |
+| RESET     | D9          |
+| DIO0      | D2          |
+| MOSI      | D11         |
+| MISO      | D12         |
+| SCK       | D13         |
+
+| NEO-6M Pin | Arduino Pin |
+|-----------|-------------|
+| TX        | D4 (SoftSerial RX) |
+| RX        | D3 (SoftSerial TX) |
+| VCC       | 3.3 V / 5 V |
+| GND       | GND         |
+
+**Receiver (Arduino Uno)**
+
+| SX1278 Pin | Arduino Pin |
+|-----------|-------------|
+| NSS / CS  | D10         |
+| RESET     | D9          |
+| DIO0      | D2          |
+
+| SSD1306 Pin | Arduino Pin |
+|------------|-------------|
+| SDA        | A4          |
+| SCL        | A5          |
+| VCC        | 3.3 V       |
+| GND        | GND         |
+
+---
+
+### 2. Flash Arduino Firmware
+
+1. Open **Arduino IDE**.
+2. Install required libraries via *Sketch → Include Library → Manage Libraries*:
+   - `LoRa` by Sandeep Mistry
+   - `TinyGPS++` by Mikal Hart
+   - `Adafruit SSD1306`
+   - `Adafruit GFX Library`
+3. Open `transmitter/transmitter.ino` → select the correct board & port → **Upload**.
+4. Open `receiver/receiver.ino` → select the correct board & port → **Upload**.
+
+---
+
+### 3. Configure & Run the Python Server
+
+```bash
+# Install dependencies
+pip install pyserial flask requests
+
+# Edit server.py — set your receiver's fixed GPS coordinates
+RECEIVER_LAT = 17.087741   # ← change to your location
+RECEIVER_LNG = 82.068771   # ← change to your location
+
+# Run the server
+python server.py
+```
+
+> The server auto-detects the Arduino COM port. If auto-detection fails, manually set `PORT = 'COMx'` (Windows) or `PORT = '/dev/ttyUSBx'` (Linux/macOS) in `server.py`.
+
+---
+
+### 4. Open the Dashboard
+
+Navigate to **http://localhost:5000** in your browser.
+
+---
+
+## 📡 Usage
+
+### Transmitter
+- Power on the TX unit outdoors (GPS requires clear sky view).
+- Wait for the serial monitor to show `"LoRa TX ready"`.
+- The unit will print `"Waiting for GPS fix..."` until a valid fix is acquired.
+- Once fixed, packets are transmitted every **2 seconds**.
+- To change the message text, type a new message in the Serial Monitor and press Enter.
+  > Commas are automatically stripped from the message to protect the CSV parser.
+
+### Receiver — OLED Mode (No Internet Required)
+- The OLED displays: **Latitude**, **Longitude**, **Message**, and **RSSI**.
+- Works completely offline — no PC or internet needed.
+
+### Receiver — Web Dashboard Mode
+- Connect the RX Arduino to a PC via USB.
+- Run `server.py`.
+- Open `http://localhost:5000`.
+- The dashboard auto-refreshes every **3 seconds** and recalculates the road route every **15 seconds**.
+
+### Dashboard Controls
+
+| Control | Description |
+|---------|-------------|
+| **Road route** button | Toggle OSRM road route overlay |
+| **Straight line** button | Toggle Haversine straight-line overlay |
+| **GPS track history** button | Toggle the last 500-point GPS trail |
+| **Recalculate route** button | Manually trigger a fresh OSRM route fetch |
+
+### Serial Packet Format
+
+```
+DATA:<lat>,<lng>,<message>,RSSI:<value>
+```
+
+Example:
+```
+DATA:17.123456,82.654321,Hello Trainee!,RSSI:-87
+```
+
+---
+
+## 🔮 Future Enhancements
+
+- **Bi-directional communication** — allow the receiver to acknowledge packets or send commands back to the transmitter.
+- **AES-128 encryption** on LoRa packets for secure data transfer.
+- **LoRa Mesh / LoRaWAN gateway** integration for multi-node coverage and internet bridging.
+- **Battery-powered TX** with deep-sleep modes for week-long field deployments.
+- **SD-card logging** at the receiver for offline data archival.
+- **Mobile companion app** (Flutter / React Native) for on-the-go monitoring.
+- **Multiple transmitter support** with unique node IDs and a fleet-tracking dashboard.
+- **Geofencing & SMS / email alerts** when the transmitter enters or leaves predefined zones.
+- **Adaptive spreading factor (SF)** and TX power based on RSSI/SNR for optimal range vs. battery trade-off.
+- **Emergency SOS button** on TX that flags the packet as high-priority.
+- **Migration to ESP32** for built-in Wi-Fi/Bluetooth uplink and faster MCU.
+- **Offline map tiles** (cached OSM tiles) so the dashboard works even when the receiver host has no internet.
+- **Kalman filtering** of GPS data to smoothen the track and reject outliers.
+- **Altitude, speed, and heading** transmission using additional GPS fields.
+
+---
+
+## 🏁 Conclusion
+
+This project successfully demonstrates that **reliable, long-range, infrastructure-free communication** is achievable using affordable, license-free LoRa technology. By combining a GPS-enabled offline transmitter with a dual-mode receiver (OLED for pure-offline operation and a Flask-driven web dashboard for enriched online visualisation), the system bridges the gap between remote field operations and centralised monitoring **without depending on cellular or satellite networks for the link itself**.
+
+The architecture is simple, low-cost, low-power, and easily extensible — making it suitable for:
+
+- 🏔️ Asset tracking in cellular dead zones
+- 🚨 Disaster response communication
+- 🌾 Agricultural telemetry
+- 🦁 Wildlife monitoring
+- 🎓 Educational demonstrations of RF communication
+
+The use of widely available open-source libraries (`TinyGPS++`, `LoRa`, `Flask`, `Leaflet`, `OSRM`) ensures reproducibility, while the modular design leaves clear pathways for the future enhancements outlined above.
+
+---
+
+## 📄 License
+
+This project is open-source and available under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ using LoRa · Arduino · Python · Flask · Leaflet.js</sub>
 </div>
-
-<div id="map"></div>
-
-<div class="controls">
-  <span class="controls-label">Show on map:</span>
-  <button class="toggle-btn btn-road active"     onclick="toggleLayer('road')">Road route</button>
-  <button class="toggle-btn btn-straight active" onclick="toggleLayer('straight')">Straight line</button>
-  <button class="toggle-btn btn-history active"  onclick="toggleLayer('history')">GPS track history</button>
-  <button style="margin-left:auto;padding:6px 14px;border-radius:20px;border:none;
-                 background:#1D9E75;color:white;font-size:12px;cursor:pointer"
-          onclick="recalcRoute()">Recalculate route</button>
-</div>
-
-<div class="cards">
-  <div class="card"><div class="lbl">TX Latitude</div><div class="val" id="c-lat">--</div></div>
-  <div class="card"><div class="lbl">TX Longitude</div><div class="val" id="c-lng">--</div></div>
-  <div class="card"><div class="lbl">Message</div><div class="val" id="c-msg" style="font-size:13px">--</div></div>
-  <div class="card"><div class="lbl">RSSI</div><div class="val" id="c-rssi">--</div></div>
-  <div class="card"><div class="lbl">Track points</div><div class="val" id="c-pts">0</div></div>
-</div>
-
-<div class="route-panel">
-  <h3>Path information</h3>
-  <span class="rstat">Road distance: <b id="r-dist">--</b></span>
-  <span class="rstat">Drive time: <b id="r-time">--</b></span>
-  <span class="rstat-line">Straight line: <b id="r-line">--</b></span>
-  <ul class="steps-list" id="r-steps">
-    <li>Waiting for GPS data to calculate route...</li>
-  </ul>
-  <div class="history-info" id="hist-info">GPS track history: 0 points recorded</div>
-</div>
-
-<div class="legend">
-  <div class="leg-item"><div class="leg-dot" style="background:#e74c3c"></div> Transmitter (live)</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#3498db"></div> Receiver (fixed)</div>
-  <div class="leg-item"><div class="leg-line" style="background:#1D9E75"></div> Road route (OSRM)</div>
-  <div class="leg-item"><div class="leg-dashed"></div> Straight line</div>
-  <div class="leg-item"><div class="leg-dotted"></div> GPS track history</div>
-</div>
-
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-<script>
-
-var map = L.map('map').setView([{{ rx_lat }}, {{ rx_lng }}], 13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {attribution:'OpenStreetMap', maxZoom:19}).addTo(map);
-
-var txIcon = L.divIcon({ className:'',
-  html:'<div style="background:#e74c3c;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
-  iconSize:[14,14], iconAnchor:[7,7] });
-
-var rxIcon = L.divIcon({ className:'',
-  html:'<div style="background:#3498db;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
-  iconSize:[14,14], iconAnchor:[7,7] });
-
-L.marker([{{ rx_lat }}, {{ rx_lng }}], {icon: rxIcon})
-  .addTo(map).bindPopup('<b>Receiver (fixed)</b><br>Lat: {{ rx_lat }}<br>Lng: {{ rx_lng }}');
-
-var txMarker   = null;
-var roadLayer  = null;
-var lineLayer  = null;
-var histLayer  = null;
-
-var showRoad     = true;
-var showStraight = true;
-var showHistory  = true;
-
-function toggleLayer(type) {
-  if (type === 'road') {
-    showRoad = !showRoad;
-    document.querySelector('.btn-road').classList.toggle('active', showRoad);
-    if (roadLayer) { showRoad ? roadLayer.addTo(map) : map.removeLayer(roadLayer); }
-  } else if (type === 'straight') {
-    showStraight = !showStraight;
-    document.querySelector('.btn-straight').classList.toggle('active', showStraight);
-    if (lineLayer) { showStraight ? lineLayer.addTo(map) : map.removeLayer(lineLayer); }
-  } else if (type === 'history') {
-    showHistory = !showHistory;
-    document.querySelector('.btn-history').classList.toggle('active', showHistory);
-    if (histLayer) { showHistory ? histLayer.addTo(map) : map.removeLayer(histLayer); }
-  }
-}
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-  var R = 6371;
-  var dLat = (lat2 - lat1) * Math.PI / 180;
-  var dLng = (lng2 - lng1) * Math.PI / 180;
-  var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
-          Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
-          Math.sin(dLng/2)*Math.sin(dLng/2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-function recalcRoute() {
-  fetch('/route').then(r => r.json()).then(d => {
-    if (d.error) {
-      document.getElementById('r-steps').innerHTML = '<li>' + d.error + '</li>';
-      document.getElementById('r-dist').textContent = '--';
-      document.getElementById('r-time').textContent = '--';
-      return;
-    }
-    document.getElementById('r-dist').textContent = d.distance;
-    document.getElementById('r-time').textContent = d.duration;
-    var html = d.steps.map((s,i) => '<li>' + (i+1) + '. ' + s + '</li>').join('');
-    document.getElementById('r-steps').innerHTML = html || '<li>Route found</li>';
-
-    if (roadLayer) map.removeLayer(roadLayer);
-    if (d.geometry && d.geometry.length > 0) {
-      roadLayer = L.polyline(d.geometry, {color:'#1D9E75', weight:4, opacity:.85});
-      if (showRoad) roadLayer.addTo(map);
-    }
-  }).catch(e => {
-    document.getElementById('r-steps').innerHTML = '<li>Route error: ' + e + '</li>';
-  });
-}
-
-function updateStraightLine(txLat, txLng) {
-  if (lineLayer) map.removeLayer(lineLayer);
-  var dist = haversineKm(txLat, txLng, {{ rx_lat }}, {{ rx_lng }});
-  var distStr = dist >= 1 ? dist.toFixed(1) + ' km' : (dist*1000).toFixed(0) + ' m';
-  document.getElementById('r-line').textContent = distStr;
-  lineLayer = L.polyline([[txLat, txLng],[{{ rx_lat }}, {{ rx_lng }}]],
-    {color:'#E08020', weight:2.5, dashArray:'10,6', opacity:.8});
-  if (showStraight) lineLayer.addTo(map);
-}
-
-function updateHistory(points) {
-  if (histLayer) map.removeLayer(histLayer);
-  if (points.length < 2) return;
-  var latlngs = points.map(p => [p[0], p[1]]);
-  histLayer = L.polyline(latlngs,
-    {color:'#378ADD', weight:3, dashArray:'1,8', lineCap:'round', opacity:.7});
-  if (showHistory) histLayer.addTo(map);
-  document.getElementById('c-pts').textContent = points.length;
-  document.getElementById('hist-info').textContent =
-    'GPS track history: ' + points.length + ' points recorded';
-}
-
-function update() {
-  fetch('/data').then(r => r.json()).then(d => {
-    document.getElementById('c-lat').textContent  = d.lat  || '--';
-    document.getElementById('c-lng').textContent  = d.lng  || '--';
-    document.getElementById('c-msg').textContent  = d.msg;
-    document.getElementById('c-rssi').textContent = d.rssi !== 'N/A' ? d.rssi + ' dBm' : '--';
-    document.getElementById('last-update').textContent =
-      'Last update: ' + new Date().toLocaleTimeString();
-
-    if (d.lat && d.lng) {
-      var lat = parseFloat(d.lat), lng = parseFloat(d.lng);
-      var latlng = [lat, lng];
-      if (!txMarker) {
-        txMarker = L.marker(latlng, {icon: txIcon}).addTo(map)
-          .bindPopup('<b>Transmitter (live GPS)</b><br>' + d.msg);
-        map.setView(latlng, 13);
-      } else {
-        txMarker.setLatLng(latlng).setPopupContent('<b>Transmitter (live GPS)</b><br>' + d.msg);
-      }
-      updateStraightLine(lat, lng);
-    }
-  });
-
-  fetch('/history').then(r => r.json()).then(d => {
-    updateHistory(d.points);
-  });
-}
-
-setInterval(update, 3000);
-setInterval(recalcRoute, 15000);
-update();
-setTimeout(recalcRoute, 3000);
-
-</script>
-</body>
-</html>
-"""
-
-
-@app.route('/')
-def index():
-    return render_template_string(HTML, rx_lat=RECEIVER_LAT, rx_lng=RECEIVER_LNG)
-
-
-@app.route('/data')
-def data():
-    with data_lock:
-        return jsonify(latest_data)
-
-
-@app.route('/history')
-def history():
-    with data_lock:
-        return jsonify({"points": list(gps_history)})
-
-
-@app.route('/route')
-def get_route():
-    with data_lock:
-        lat_s, lng_s = latest_data['lat'], latest_data['lng']
-
-    if not lat_s or not lng_s:
-        return jsonify({"error": "No GPS data yet"})
-
-    try:
-        tx_lat = float(lat_s)
-        tx_lng = float(lng_s)
-
-        url = (
-            f"http://router.project-osrm.org/route/v1/driving/"
-            f"{tx_lng},{tx_lat};{RECEIVER_LNG},{RECEIVER_LAT}"
-            f"?overview=full&geometries=geojson&steps=true"
-        )
-        resp = requests.get(url, timeout=15)
-        result = resp.json()
-
-        if result.get('code') != 'Ok':
-            return jsonify({"error": "OSRM error: " + result.get('code', 'unknown')})
-
-        route = result['routes'][0]
-        dist_m = route['distance']
-        dur_s  = route['duration']
-
-        dist_str = f"{dist_m/1000:.1f} km" if dist_m >= 1000 else f"{dist_m:.0f} m"
-
-        if dur_s >= 3600:
-            dur_str = f"{int(dur_s//3600)}h {int((dur_s%3600)//60)}m"
-        elif dur_s >= 60:
-            dur_str = f"{int(dur_s//60)} min"
-        else:
-            dur_str = f"{int(dur_s)} sec"
-
-        steps = []
-        for leg in route['legs']:
-            for step in leg['steps']:
-                m    = step.get('maneuver', {})
-                typ  = m.get('type', '')
-                mod  = m.get('modifier', '')
-                name = step.get('name', '')
-                dist = step.get('distance', 0)
-                if typ == 'depart':
-                    txt = f"Start on {name}" if name else "Depart"
-                elif typ == 'arrive':
-                    txt = "Arrive at destination"
-                elif mod:
-                    txt = f"Turn {mod}" + (f" onto {name}" if name else "")
-                else:
-                    txt = typ.capitalize() + (f" on {name}" if name else "")
-                if dist > 0:
-                    d_str = f"{dist/1000:.1f} km" if dist >= 1000 else f"{dist:.0f} m"
-                    txt += f" ({d_str})"
-                steps.append(txt)
-
-        coords = route['geometry']['coordinates']
-        geometry = [[c[1], c[0]] for c in coords]
-
-        return jsonify({
-            "distance": dist_str,
-            "duration": dur_str,
-            "steps":    steps,
-            "geometry": geometry
-        })
-
-    except requests.exceptions.Timeout:
-        return jsonify({"error": "OSRM timeout — check internet connection"})
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-
-def is_valid(line):
-    """Validate a DATA: line before parsing."""
-    try:
-        c = line[5:]
-        if ",RSSI:" in c:
-            c = c.split(",RSSI:")[0]
-        p = c.split(",", 2)
-        if len(p) < 3:
-            return False
-        lat, lng = float(p[0]), float(p[1])
-        return -90 <= lat <= 90 and -180 <= lng <= 180 and len(p[2].strip()) > 0
-    except Exception:
-        return False
-
-
-def read_serial():
-    """Background thread that reads packets from the receiver Arduino."""
-    PORT = 'COM11'   # change if needed
-    ports = serial.tools.list_ports.comports()
-    for p in ports:
-        if any(x in (p.description or "") for x in ['Arduino', 'CH340', 'USB Serial']):
-            PORT = p.device
-            break
-
-    print(f"Connecting to {PORT}...")
-    while True:
-        try:
-            ser = serial.Serial(PORT, 9600, timeout=2)
-            print(f"Connected to {PORT} — waiting for data...")
-            while True:
-                raw  = ser.readline()
-                line = raw.decode('utf-8', errors='ignore').strip()
-                if not line.startswith("DATA:"):
-                    continue
-                if not is_valid(line):
-                    print(f"  Skipped (corrupted): {line}")
-                    continue
-
-                c = line[5:]
-                rssi = "N/A"
-                if ",RSSI:" in c:
-                    sp = c.split(",RSSI:")
-                    rssi = sp[1]
-                    c = sp[0]
-                p = c.split(",", 2)
-                lat = p[0].strip()
-                lng = p[1].strip()
-                msg = p[2].strip()
-
-                with data_lock:
-                    latest_data.update({'lat': lat, 'lng': lng, 'msg': msg, 'rssi': rssi})
-                    gps_history.append([float(lat), float(lng)])
-                    if len(gps_history) > MAX_HISTORY:
-                        gps_history.pop(0)
-
-                print(f"  lat={lat} lng={lng} | history={len(gps_history)} pts")
-
-        except serial.SerialException as e:
-            print(f"Serial error: {e} — retry in 4s")
-            time.sleep(4)
-
-
-# Start serial reader thread
-threading.Thread(target=read_serial, daemon=True).start()
-
-
-if __name__ == '__main__':
-    print("=" * 50)
-    print("  LoRa Long Distance Tracker")
-    print("  Open http://localhost:5000")
-    print("=" * 50)
-    app.run(host='0.0.0.0', port=5000, debug=False)
