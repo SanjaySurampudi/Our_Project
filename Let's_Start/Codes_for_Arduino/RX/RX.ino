@@ -1,19 +1,17 @@
 /*
- * rx.ino  —  LoRa Receiver with OLED display
+ * rx.ino — LoRa Receiver with OLED display
  *
- * Fix applied
- * -----------
- * RSSI is now appended to the DATA: serial output so the Python server
- * can parse it.  Format:
+ * Receives GPS coordinates + text message via LoRa and displays them
+ * on a 128x64 SSD1306 OLED. Also forwards data via USB serial to the
+ * Python server in this format:
  *
  *     DATA:<lat>,<lng>,<message>,RSSI:<value>
  *
  * Example:
- *     DATA:17.385000,78.486700,Hello World,RSSI:-87
+ *     DATA:17.385000,78.486700,Hello Trainee!,RSSI:-87
  *
- * Libraries required
- * ------------------
- *   LoRa          by Sandeep Mistry
+ * Libraries:
+ *   LoRa             by Sandeep Mistry
  *   Adafruit GFX
  *   Adafruit SSD1306
  */
@@ -24,24 +22,23 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// ── OLED configuration ───────────────────────────────────────────────────────
+// OLED configuration
 #define SCREEN_WIDTH  128
 #define SCREEN_HEIGHT  64
-#define OLED_RESET     -1          // No hardware reset pin used
+#define OLED_RESET     -1
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// ── LoRa pin definitions (Arduino Uno / Nano) ────────────────────────────────
-#define LORA_SS    10             // Chip Select (NSS)
-#define LORA_RST    9             // Reset
-#define LORA_DIO0   2             // Interrupt (DIO0)
+// LoRa pin definitions
+#define LORA_SS    10
+#define LORA_RST    9
+#define LORA_DIO0   2
 
-// ── Setup ────────────────────────────────────────────────────────────────────
 void setup() {
   Serial.begin(9600);
 
   // Initialise LoRa
   LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
-  if (!LoRa.begin(433E6)) {       // 433 MHz — must match transmitter
+  if (!LoRa.begin(433E6)) {
     Serial.println("LoRa init failed!");
     while (1);
   }
@@ -62,37 +59,37 @@ void setup() {
   Serial.println("LoRa RX ready");
 }
 
-// ── Main loop ────────────────────────────────────────────────────────────────
 void loop() {
   int packetSize = LoRa.parsePacket();
-  if (packetSize == 0) return;    // Nothing received yet
+  if (packetSize == 0) return;
 
-  // Read the incoming bytes into a String
-  String received = "Waiting For GPS Signal";
+  // FIX: Start with an empty string (was incorrectly pre-loaded)
+  String received = "";
   while (LoRa.available()) {
     received += (char)LoRa.read();
   }
 
-  // Read RSSI *immediately* after receiving the packet (most accurate)
+  // Read RSSI immediately after receiving (most accurate)
   int rssi = LoRa.packetRssi();
 
-  // ── Serial output ──────────────────────────────────────────────────────
-  // Format:  DATA:<lat>,<lng>,<message>,RSSI:<value>
-  // The Python server splits on ",RSSI:" to extract the RSSI field.
+  // Serial output for Python server
+  // Format: DATA:<lat>,<lng>,<message>,RSSI:<value>
   Serial.print("DATA:");
-  Serial.print(received);         // already contains  lat,lng,message
+  Serial.print(received);
   Serial.print(",RSSI:");
-  Serial.println(rssi);           // e.g.  -87
+  Serial.println(rssi);
 
-  // ── Parse fields for OLED display ──────────────────────────────────────
+  // Parse fields for OLED display
   int firstComma  = received.indexOf(',');
   int secondComma = received.indexOf(',', firstComma + 1);
+
+  if (firstComma < 0 || secondComma < 0) return;   // skip malformed packets
 
   String lat = received.substring(0, firstComma);
   String lng = received.substring(firstComma + 1, secondComma);
   String msg = received.substring(secondComma + 1);
 
-  // ── Update OLED ────────────────────────────────────────────────────────
+  // Update OLED
   display.clearDisplay();
   display.setCursor(0, 0);
   display.println("GPS Tracker RX");
