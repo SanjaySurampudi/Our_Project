@@ -7,7 +7,6 @@
  *   TinyGPSPlus     by Mikal Hart
  *   SoftwareSerial  (built-in)
 */
-
 #include <SPI.h>
 #include <LoRa.h>
 #include <SoftwareSerial.h>
