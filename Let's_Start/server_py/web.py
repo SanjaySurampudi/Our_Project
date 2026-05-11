@@ -1,18 +1,35 @@
+"""
+LoRa Long Distance Tracker — Flask Server
+
+Reads LoRa packets from the receiver Arduino over USB serial and renders
+a live web dashboard with map, road route, straight-line distance, and
+GPS track history.
+
+Dependencies:
+    pip install pyserial flask requests
+
+Run:
+    python server.py
+    Open http://localhost:5000
+"""
+
+import threading
+import time
 import serial
 import serial.tools.list_ports
-import threading
 import requests
-import math
 from flask import Flask, render_template_string, jsonify
 
 app = Flask(__name__)
 
-latest_data  = {"lat": "", "lng": "", "msg": "Waiting for LoRa data...", "rssi": "N/A"}
-gps_history  = []          # stores all past TX coordinates
-MAX_HISTORY  = 500         # keep last 500 points
+# Shared state (protected by data_lock)
+data_lock = threading.Lock()
+latest_data = {"lat": "", "lng": "", "msg": "Waiting for LoRa data...", "rssi": "N/A"}
+gps_history = []          # stores past TX coordinates
+MAX_HISTORY = 500         # keep last 500 points
 
 # ---- SET YOUR RECEIVER FIXED LOCATION HERE ----
-RECEIVER_LAT = 17.087741     # example: Hyderabad
+RECEIVER_LAT = 17.087741
 RECEIVER_LNG = 82.068771
 # ------------------------------------------------
 
@@ -123,7 +140,7 @@ HTML = """
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
 
-var map = L.map('map').setView([{{ cx }}, {{ cy }}], {{ zoom }});
+var map = L.map('map').setView([{{ rx_lat }}, {{ rx_lng }}], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   {attribution:'OpenStreetMap', maxZoom:19}).addTo(map);
 
@@ -135,7 +152,7 @@ var rxIcon = L.divIcon({ className:'',
   html:'<div style="background:#3498db;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
   iconSize:[14,14], iconAnchor:[7,7] });
 
-var rxMarker = L.marker([{{ rx_lat }}, {{ rx_lng }}], {icon: rxIcon})
+L.marker([{{ rx_lat }}, {{ rx_lng }}], {icon: rxIcon})
   .addTo(map).bindPopup('<b>Receiver (fixed)</b><br>Lat: {{ rx_lat }}<br>Lng: {{ rx_lng }}');
 
 var txMarker   = null;
@@ -233,7 +250,7 @@ function update() {
       if (!txMarker) {
         txMarker = L.marker(latlng, {icon: txIcon}).addTo(map)
           .bindPopup('<b>Transmitter (live GPS)</b><br>' + d.msg);
-        map.setView(latlng, {{ zoom }});
+        map.setView(latlng, 13);
       } else {
         txMarker.setLatLng(latlng).setPopupContent('<b>Transmitter (live GPS)</b><br>' + d.msg);
       }
@@ -256,42 +273,48 @@ setTimeout(recalcRoute, 3000);
 </html>
 """
 
+
 @app.route('/')
 def index():
-    cx  = (RECEIVER_LAT + 20) / 2
-    cy  = (RECEIVER_LNG + 80) / 2
-    return render_template_string(HTML,
-        rx_lat=RECEIVER_LAT, rx_lng=RECEIVER_LNG,
-        cx=cx, cy=cy, zoom=6)
+    return render_template_string(HTML, rx_lat=RECEIVER_LAT, rx_lng=RECEIVER_LNG)
+
 
 @app.route('/data')
 def data():
-    return __import__('flask').jsonify(latest_data)
+    with data_lock:
+        return jsonify(latest_data)
+
 
 @app.route('/history')
 def history():
-    return __import__('flask').jsonify({"points": gps_history})
+    with data_lock:
+        return jsonify({"points": list(gps_history)})
+
 
 @app.route('/route')
 def get_route():
-    if not latest_data['lat'] or not latest_data['lng']:
-        return __import__('flask').jsonify({"error": "No GPS data yet"})
+    with data_lock:
+        lat_s, lng_s = latest_data['lat'], latest_data['lng']
+
+    if not lat_s or not lng_s:
+        return jsonify({"error": "No GPS data yet"})
+
     try:
-        tx_lat = float(latest_data['lat'])
-        tx_lng = float(latest_data['lng'])
+        tx_lat = float(lat_s)
+        tx_lng = float(lng_s)
 
         url = (
             f"http://router.project-osrm.org/route/v1/driving/"
             f"{tx_lng},{tx_lat};{RECEIVER_LNG},{RECEIVER_LAT}"
             f"?overview=full&geometries=geojson&steps=true"
         )
-        resp   = requests.get(url, timeout=15)
+        resp = requests.get(url, timeout=15)
         result = resp.json()
 
         if result.get('code') != 'Ok':
-            return __import__('flask').jsonify({"error": "OSRM error: " + result.get('code','unknown')})
+            return jsonify({"error": "OSRM error: " + result.get('code', 'unknown')})
 
-        route  = result['routes'][0]
+        route = result['routes'][0]
         dist_m = route['distance']
         dur_s  = route['duration']
 
@@ -322,13 +345,13 @@ def get_route():
                     txt = typ.capitalize() + (f" on {name}" if name else "")
                 if dist > 0:
                     d_str = f"{dist/1000:.1f} km" if dist >= 1000 else f"{dist:.0f} m"
-                    txt  += f" ({d_str})"
+                    txt += f" ({d_str})"
                 steps.append(txt)
 
-        coords   = route['geometry']['coordinates']
+        coords = route['geometry']['coordinates']
         geometry = [[c[1], c[0]] for c in coords]
 
-        return __import__('flask').jsonify({
+        return jsonify({
             "distance": dist_str,
             "duration": dur_str,
             "steps":    steps,
@@ -336,29 +359,34 @@ def get_route():
         })
 
     except requests.exceptions.Timeout:
-        return __import__('flask').jsonify({"error": "OSRM timeout — check internet connection"})
+        return jsonify({"error": "OSRM timeout — check internet connection"})
     except Exception as e:
-        return __import__('flask').jsonify({"error": str(e)})
+        return jsonify({"error": str(e)})
 
 
 def is_valid(line):
+    """Validate a DATA: line before parsing."""
     try:
         c = line[5:]
-        if ",RSSI:" in c: c = c.split(",RSSI:")[0]
+        if ",RSSI:" in c:
+            c = c.split(",RSSI:")[0]
         p = c.split(",", 2)
-        if len(p) < 3: return False
+        if len(p) < 3:
+            return False
         lat, lng = float(p[0]), float(p[1])
         return -90 <= lat <= 90 and -180 <= lng <= 180 and len(p[2].strip()) > 0
-    except:
+    except Exception:
         return False
 
+
 def read_serial():
-    import time
-    PORT = 'COM11'
+    """Background thread that reads packets from the receiver Arduino."""
+    PORT = 'COM11'   # change if needed
     ports = serial.tools.list_ports.comports()
     for p in ports:
-        if any(x in p.description for x in ['Arduino','CH340','USB Serial']):
-            PORT = p.device; break
+        if any(x in (p.description or "") for x in ['Arduino', 'CH340', 'USB Serial']):
+            PORT = p.device
+            break
 
     print(f"Connecting to {PORT}...")
     while True:
@@ -368,25 +396,28 @@ def read_serial():
             while True:
                 raw  = ser.readline()
                 line = raw.decode('utf-8', errors='ignore').strip()
-                if not line.startswith("DATA:"): continue
+                if not line.startswith("DATA:"):
+                    continue
                 if not is_valid(line):
-                    print(f"  Skipped (corrupted): {line}"); continue
+                    print(f"  Skipped (corrupted): {line}")
+                    continue
 
                 c = line[5:]
                 rssi = "N/A"
                 if ",RSSI:" in c:
-                    sp = c.split(",RSSI:"); rssi = sp[1]; c = sp[0]
+                    sp = c.split(",RSSI:")
+                    rssi = sp[1]
+                    c = sp[0]
                 p = c.split(",", 2)
                 lat = p[0].strip()
                 lng = p[1].strip()
                 msg = p[2].strip()
 
-                latest_data.update({'lat':lat,'lng':lng,'msg':msg,'rssi':rssi})
-
-                # Add to GPS track history
-                gps_history.append([float(lat), float(lng)])
-                if len(gps_history) > MAX_HISTORY:
-                    gps_history.pop(0)
+                with data_lock:
+                    latest_data.update({'lat': lat, 'lng': lng, 'msg': msg, 'rssi': rssi})
+                    gps_history.append([float(lat), float(lng)])
+                    if len(gps_history) > MAX_HISTORY:
+                        gps_history.pop(0)
 
                 print(f"  lat={lat} lng={lng} | history={len(gps_history)} pts")
 
@@ -394,13 +425,14 @@ def read_serial():
             print(f"Serial error: {e} — retry in 4s")
             time.sleep(4)
 
-t = threading.Thread(target=read_serial, daemon=True)
-t.start()
+
+# Start serial reader thread
+threading.Thread(target=read_serial, daemon=True).start()
+
 
 if __name__ == '__main__':
-    print("="*50)
+    print("=" * 50)
     print("  LoRa Long Distance Tracker")
     print("  Open http://localhost:5000")
-    print("="*50)
-    __import__('flask').Flask(__name__)
+    print("=" * 50)
     app.run(host='0.0.0.0', port=5000, debug=False)
