@@ -11,7 +11,6 @@
  *   Adafruit GFX
  *   Adafruit SSD1306
  */
-
 #include <SPI.h>
 #include <LoRa.h>
 #include <Wire.h>
