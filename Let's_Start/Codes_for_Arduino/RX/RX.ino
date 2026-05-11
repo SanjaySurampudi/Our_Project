@@ -76,12 +76,12 @@ void loop() {
   // Format: DATA:<lat>,<lng>,<message>,RSSI:<value>
   Serial.print("DATA:");
   Serial.print(received);
-  Serial.print(",RSSI:");
+  Serial.print("| RSSI:");
   Serial.println(rssi);
 
   // Parse fields for OLED display
-  int firstComma  = received.indexOf(',');
-  int secondComma = received.indexOf(',', firstComma + 1);
+  int firstComma  = received.indexOf('|');
+  int secondComma = received.indexOf('|', firstComma + 1);
 
   if (firstComma < 0 || secondComma < 0) return;   // skip malformed packets
 
