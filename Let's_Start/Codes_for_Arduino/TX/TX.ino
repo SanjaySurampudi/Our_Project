@@ -1,15 +1,12 @@
 /*
  * tx.ino — LoRa Transmitter with GPS
- *
  * Sends GPS coordinates + text message via LoRa every 2 seconds.
- *
  * Packet format:  lat,lng,message
- *
  * Libraries:
  *   LoRa            by Sandeep Mistry
  *   TinyGPSPlus     by Mikal Hart
  *   SoftwareSerial  (built-in)
- */
+*/
 
 #include <SPI.h>
 #include <LoRa.h>
@@ -80,4 +77,3 @@ void loop() {
 
   delay(2000);   // Send every 2 seconds
 }
-
