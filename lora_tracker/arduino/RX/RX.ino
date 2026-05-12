@@ -101,11 +101,13 @@ void loop() {
   bool hasSeq = false;
   if (thirdComma > 0) {
     String first = received.substring(0, firstComma);
-    hasSeq = true;
-    for (unsigned int i = 0; i < first.length(); i++) {
-      if (!isDigit(first[i])) { hasSeq = false; break; }
+    // Sanity check: sequence numbers should be 1-10 digits, coordinates start with - or digit and have a decimal point
+    if (first.length() > 0 && first.length() <= 10) {
+      hasSeq = true;
+      for (unsigned int i = 0; i < first.length(); i++) {
+        if (!isDigit(first[i])) { hasSeq = false; break; }
+      }
     }
-    if (first.length() == 0) hasSeq = false;
   }
 
   if (hasSeq) {

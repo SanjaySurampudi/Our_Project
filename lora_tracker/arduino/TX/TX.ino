@@ -55,16 +55,30 @@ void loop() {
   if (Serial.available() > 0) {
     String incoming = Serial.readStringUntil('\n');
     incoming.trim();
+    
+    // Check if message contains commas before replacing
+    bool hadCommas = (incoming.indexOf(',') >= 0);
     incoming.replace(',', ' ');   // protect CSV parser on RX side
+    
     if (incoming.length() > 0) {
       textMessage = incoming;
       Serial.println("Message updated: " + textMessage);
+      if (hadCommas) {
+        Serial.println("  WARNING: Commas replaced with spaces to protect CSV format");
+      }
     }
   }
 
-  // Only transmit when GPS has a valid fix
+  // Only transmit when GPS has a valid AND RECENT fix
   if (!gps.location.isValid()) {
     Serial.println("Waiting for GPS fix...");
+    delay(2000);
+    return;
+  }
+
+  // Check GPS data age - reject if older than 2 seconds (stale fix)
+  if (gps.location.age() > 2000) {
+    Serial.println("GPS fix is stale (age=" + String(gps.location.age()) + "ms) - waiting for fresh data");
     delay(2000);
     return;
   }
@@ -78,7 +92,7 @@ void loop() {
                   String(lng, 6)   + "," +
                   textMessage;
 
-  Serial.println("Sending: " + packet);
+  Serial.println("Sending: " + packet + " (GPS age=" + String(gps.location.age()) + "ms)");
 
   LoRa.beginPacket();
   LoRa.print(packet);

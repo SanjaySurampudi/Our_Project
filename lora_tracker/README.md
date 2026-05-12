@@ -61,7 +61,26 @@ python server.py
 Set `RECEIVER_LAT` / `RECEIVER_LNG` near the top of `server.py` to your
 fixed receiver location.
 
-<<<<<<< HEAD
+### Security note
+
+By default, the server binds to `127.0.0.1` (localhost only) so only
+your computer can access the dashboard. If you want to view it from
+another device on the same WiFi (e.g., your phone), set:
+
+```bash
+# Linux/macOS
+export FLASK_HOST=0.0.0.0
+python server.py
+
+# Windows
+set FLASK_HOST=0.0.0.0
+python server.py
+```
+
+**Warning:** This exposes GPS coordinates and message content to anyone
+on your local network without authentication. Only use this in trusted
+networks.
+
 ### Selecting the serial port
 
 The server picks the port in this order:
@@ -80,8 +99,6 @@ The server picks the port in this order:
    "Waiting for LoRa data...". No more silent infinite retries on a
    non-existent `COM11`.
 
-=======
->>>>>>> 39dc3ba9dd20a70c0ce769d965728111f1c94715
 ## Run the tests
 
 ```bash
@@ -121,12 +138,32 @@ lines, simulating a loopback device. OSRM is mocked with
    - `test_integration_serial.py` — patches `serial.Serial` with
      `FakeSerial` to feed a real byte stream through `read_serial()`,
      plus direct `_ingest_line` tests for dropped-packet detection
-     and history cap.
+     and history cap. Includes port-resolution tests.
 
 3. **Consistent packet format.**
    - `RX.ino` now prints `,RSSI:<value>` (comma before `RSSI:`)
-     matching the documented `DATA:<…>,RSSI:<value>` format.
-   - `TX.ino` prepends a monotonically increasing `<seq>` field.
+     matching the documented `DATA:<…>,RSSI:<value>` format, with
+     improved sequence number detection (validates length 1-10 digits).
+   - `TX.ino` prepends a monotonically increasing `<seq>` field and
+     checks `gps.location.age() < 2000` to avoid transmitting stale
+     coordinates after GPS signal loss.
    - The server tracks `seq` and `dropped` in `latest_data`, and the
      dashboard shows both as cards. Drops are detected by gaps in the
      sequence number.
+
+4. **Port detection fixed.** No more silent `COM11` fallback. Priority:
+   `LORA_PORT` env var → auto-detection (Arduino/CH340/CP210/FTDI/
+   ttyUSB/ttyACM) → clear error listing available ports.
+
+5. **Security improved.** Server binds to `127.0.0.1` (localhost only)
+   by default instead of `0.0.0.0`. Set `FLASK_HOST=0.0.0.0` if you
+   need LAN access (dashboard accessible from phone on same WiFi).
+
+6. **Route recalculation optimized.** Dashboard now only fetches a new
+   OSRM route when the transmitter moves >5 meters (instead of every 15
+   seconds regardless), reducing bandwidth and avoiding rate limits.
+
+7. **TX.ino warns about comma replacement.** When updating the message
+   via Serial Monitor, if the user's text contains commas, TX now prints
+   a warning explaining they were replaced with spaces to protect the
+   CSV packet format.
