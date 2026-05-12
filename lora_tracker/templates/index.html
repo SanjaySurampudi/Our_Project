@@ -167,6 +167,50 @@
 <!-- ── Map ─────────────────────────────────────────────────────────────── -->
 <div id="map"></div>
 
+<<<<<<< HEAD
+=======
+<div class="controls">
+  <span class="controls-label">Show on map:</span>
+  <button class="toggle-btn btn-road active"     onclick="toggleLayer('road')">Road route</button>
+  <button class="toggle-btn btn-straight active" onclick="toggleLayer('straight')">Straight line</button>
+  <button class="toggle-btn btn-history active"  onclick="toggleLayer('history')">GPS track history</button>
+  <button style="margin-left:auto;padding:6px 14px;border-radius:20px;border:none;
+                 background:#1D9E75;color:white;font-size:12px;cursor:pointer"
+          onclick="recalcRoute()">Recalculate route</button>
+</div>
+
+<div class="cards">
+  <div class="card"><div class="lbl">TX Latitude</div><div class="val" id="c-lat">--</div></div>
+  <div class="card"><div class="lbl">TX Longitude</div><div class="val" id="c-lng">--</div></div>
+  <div class="card"><div class="lbl">Message</div><div class="val" id="c-msg" style="font-size:13px">--</div></div>
+  <div class="card"><div class="lbl">RSSI</div><div class="val" id="c-rssi">--</div></div>
+  <div class="card"><div class="lbl">Track points</div><div class="val" id="c-pts">0</div></div>
+  <div class="card"><div class="lbl">Seq #</div><div class="val" id="c-seq">--</div></div>
+  <div class="card"><div class="lbl">Dropped</div><div class="val" id="c-drop" style="color:#e74c3c">0</div></div>
+</div>
+
+<div class="route-panel">
+  <h3>Path information</h3>
+  <span class="rstat">Road distance: <b id="r-dist">--</b></span>
+  <span class="rstat">Drive time: <b id="r-time">--</b></span>
+  <span class="rstat-line">Straight line: <b id="r-line">--</b></span>
+  <ul class="steps-list" id="r-steps">
+    <li>Waiting for GPS data to calculate route...</li>
+  </ul>
+  <div class="history-info" id="hist-info">GPS track history: 0 points recorded</div>
+</div>
+
+<div class="legend">
+  <div class="leg-item"><div class="leg-dot" style="background:#e74c3c"></div> Transmitter (live)</div>
+  <div class="leg-item"><div class="leg-dot" style="background:#3498db"></div> Receiver (fixed)</div>
+  <div class="leg-item"><div class="leg-line" style="background:#1D9E75"></div> Road route (OSRM)</div>
+  <div class="leg-item"><div class="leg-dashed"></div> Straight line</div>
+  <div class="leg-item"><div class="leg-dotted"></div> GPS track history</div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.offline@2.2.0/dist/leaflet.offline.min.js"></script>
+>>>>>>> 549e0e2108c186d6eadcec739bf2058fb919d1fb
 <script>
   // ── Config injected by Flask ──────────────────────────────────────────
   const RECEIVER_LAT = {{ receiver_lat }};
