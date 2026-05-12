@@ -61,6 +61,24 @@ python server.py
 Set `RECEIVER_LAT` / `RECEIVER_LNG` near the top of `server.py` to your
 fixed receiver location.
 
+### Selecting the serial port
+
+The server picks the port in this order:
+
+1. **`LORA_PORT` environment variable** — explicit override:
+   ```bash
+   # Linux/macOS
+   export LORA_PORT=/dev/ttyUSB0
+   # Windows
+   set LORA_PORT=COM11
+   ```
+2. **Auto-detection** by USB descriptor keyword (Arduino, CH340, CP210,
+   FTDI, USB Serial, ttyUSB, ttyACM).
+3. If neither finds a port, the server prints a clear error listing
+   available ports and the dashboard keeps running with
+   "Waiting for LoRa data...". No more silent infinite retries on a
+   non-existent `COM11`.
+
 ## Run the tests
 
 ```bash
