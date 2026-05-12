@@ -36,7 +36,10 @@ Selecting the serial port (priority order):
        listing the available ports and the web dashboard keeps
        running (showing "Waiting for LoRa data...").
 """
-
+# ---- SET YOUR RECEIVER FIXED LOCATION HERE ----
+RECEIVER_LAT = 17.087741
+RECEIVER_LNG = 82.068771
+# ------------------------------------------------
 import os
 import threading
 import time
