@@ -6,9 +6,9 @@
 
 ## 📋 Table of Contents
 
-1. [Description](#description)
-2. [Requirements](#requirements)
-3. [Problem Statement](#problem-statement)
+1. [Description](#Description)
+2. [Requirements](#Requirements)
+3. [Problem Statement](#Problem-Statement)
 4. [Proposed Solution](#proposed-solution)
 5. [Technologies Used](#technologies-used)
 6. [System Architecture](#system-architecture)
