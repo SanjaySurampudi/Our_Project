@@ -61,6 +61,7 @@ python server.py
 Set `RECEIVER_LAT` / `RECEIVER_LNG` near the top of `server.py` to your
 fixed receiver location.
 
+<<<<<<< HEAD
 ### Selecting the serial port
 
 The server picks the port in this order:
@@ -79,6 +80,8 @@ The server picks the port in this order:
    "Waiting for LoRa data...". No more silent infinite retries on a
    non-existent `COM11`.
 
+=======
+>>>>>>> 39dc3ba9dd20a70c0ce769d965728111f1c94715
 ## Run the tests
 
 ```bash
