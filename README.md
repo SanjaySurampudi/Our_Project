@@ -6,20 +6,19 @@
 
 ## 📋 Table of Contents
 
-1. [Description](#Description)
-2. [Requirements](#Requirements)
-3. [Problem Statement](#Problem-Statement)
-4. [Proposed Solution](#proposed-solution)
-5. [Technologies Used](#technologies-used)
-6. [System Architecture](#system-architecture)
-7. [In-Scope](#in-scope)
-8. [Out-of-Scope](#out-of-scope)
-9. [Project Structure](#project-structure)
-10. [Getting Started](#getting-started)
-11. [Usage](#usage)
-12. [Future Enhancements](#future-enhancements)
-13. [Conclusion](#conclusion)
-
+1. [Description]
+2. [Requirements]
+3. [Problem Statement]
+4. [Proposed Solution]
+5. [Technologies Used]
+6. [System Architecture]
+7. [In-Scope]
+8. [Out-of-Scope]
+9. [Project Structure]
+10. [Getting Started]
+11. [Usage]
+12. [Future Enhancements]
+13. [Conclusion]
 ---
 
 ## 📖 Description
