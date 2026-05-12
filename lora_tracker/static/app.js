@@ -2,24 +2,44 @@
 // RX_LAT and RX_LNG are injected by templates/index.html
 
 var map = L.map('map').setView([window.RX_LAT, window.RX_LNG], 13);
-var tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {attribution:'OpenStreetMap', maxZoom:19});
 
-// Add error handler for offline/unreachable tile server
+// Offline-capable tile layer — caches tiles in IndexedDB automatically
+var tileLayer = L.tileLayer.offline('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: 'OpenStreetMap',
+  maxZoom: 19,
+  minZoom: 5
+});
+tileLayer.addTo(map);
+
+// Control bar: lets user save tiles for current view for offline use
+var controlSaveTiles = L.control.savetiles(tileLayer, {
+  zoomlevels: [13, 14, 15],   // zoom levels to cache around current view
+  confirm: function(layer, successCallback) {
+    if (window.confirm('Save map tiles for offline use?')) successCallback();
+  },
+  confirmRemoval: function(layer, successCallback) {
+    if (window.confirm('Remove all saved tiles?')) successCallback();
+  },
+  saveText: '💾 Save tiles',
+  rmText: '🗑️ Clear tiles'
+});
+controlSaveTiles.addTo(map);
+
+// Show status banner when tiles load from cache vs network
+tileLayer.on('tilesaved', function(e) {
+  console.log('Tiles saved to offline cache:', e.lengthSaved);
+});
 tileLayer.on('tileerror', function() {
-  // Only show banner once
   if (!document.getElementById('map-offline-banner')) {
     var banner = document.createElement('div');
     banner.id = 'map-offline-banner';
     banner.style.cssText = 'position:absolute;top:60px;left:50%;transform:translateX(-50%);' +
       'background:#f39c12;color:white;padding:10px 20px;border-radius:5px;z-index:1000;' +
       'font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)';
-    banner.textContent = '⚠️ Map tiles unavailable (no internet). Markers still work.';
+    banner.textContent = '⚠️ No internet — using cached tiles. Markers still work.';
     document.getElementById('map').appendChild(banner);
   }
 });
-
-tileLayer.addTo(map);
 
 var txIcon = L.divIcon({ className:'',
   html:'<div style="background:#e74c3c;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
