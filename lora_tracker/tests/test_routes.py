@@ -1,165 +1,164 @@
 """
-Tests for the Flask endpoints in server.py
-- /data, /history, /route (including error paths)
-The OSRM HTTP request is mocked so tests are network-free.
+test_routes.py – Flask route tests for server.py
 
-Run:
-    python -m pytest tests/test_routes.py -v
+Covers all /data /history /route scenarios including new HTTP status codes:
+  • 503 for OSRM connectivity failures
+  • 422 for invalid cached coordinates
+  • 200 for soft errors (no GPS yet, route not found)
+  • 200 for successful route
 """
 
-import os
-import sys
-import unittest
+import sys, os, json
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import pytest
 from unittest.mock import patch, MagicMock
-
-import requests
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+import requests as req_lib
 
 import server
+from server import app, gps_history, data_lock
+
+# ── Fixtures ─────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def clear_state():
+    """Reset shared state before each test."""
+    with data_lock:
+        server.latest_data.clear()
+        gps_history.clear()
+    yield
+    with data_lock:
+        server.latest_data.clear()
+        gps_history.clear()
 
 
-def osrm_ok_response():
-    return {
+@pytest.fixture()
+def client():
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        yield c
+
+
+def _set_gps(lat=17.385, lng=78.486, rssi=-65):
+    with data_lock:
+        server.latest_data.update({"lat": lat, "lng": lng,
+                                   "rssi": rssi, "msg": "test",
+                                   "node_id": "default"})
+
+# ── /data ─────────────────────────────────────────────────────────────────
+
+def test_data_empty(client):
+    r = client.get("/data")
+    assert r.status_code == 200
+    assert r.get_json() == {}
+
+def test_data_populated(client):
+    _set_gps()
+    r = client.get("/data")
+    d = r.get_json()
+    assert d["lat"] == pytest.approx(17.385, rel=1e-4)
+    assert d["rssi"] == -65
+
+# ── /history ──────────────────────────────────────────────────────────────
+
+def test_history_empty(client):
+    r = client.get("/history")
+    assert r.get_json() == []
+
+def test_history_populated(client):
+    with data_lock:
+        gps_history.append({"lat": 17.0, "lng": 78.0, "rssi": -70})
+        gps_history.append({"lat": 17.1, "lng": 78.1, "rssi": -68})
+    r = client.get("/history")
+    hist = r.get_json()
+    assert len(hist) == 2
+    assert hist[0]["lat"] == pytest.approx(17.0)
+
+# ── /route – soft 200 errors ──────────────────────────────────────────────
+
+def test_route_no_gps_returns_200(client):
+    r = client.get("/route")
+    assert r.status_code == 200
+    assert r.get_json()["error"] == "no_gps_yet"
+
+def test_route_not_found_osrm_returns_200(client):
+    _set_gps()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = {"code": "NoRoute", "routes": []}
+    with patch("server.requests.get", return_value=mock_resp):
+        r = client.get("/route")
+    assert r.status_code == 200
+    assert r.get_json()["error"] == "route_not_found"
+
+# ── /route – 422 invalid coordinates ─────────────────────────────────────
+
+def test_route_invalid_lat_returns_422(client):
+    with data_lock:
+        server.latest_data.update({"lat": 999, "lng": 78.0})
+    r = client.get("/route")
+    assert r.status_code == 422
+    assert r.get_json()["error"] == "invalid_coordinates"
+
+def test_route_invalid_lng_returns_422(client):
+    with data_lock:
+        server.latest_data.update({"lat": 17.0, "lng": -999})
+    r = client.get("/route")
+    assert r.status_code == 422
+
+# ── /route – 503 OSRM failures ────────────────────────────────────────────
+
+def test_route_osrm_timeout_returns_503(client):
+    _set_gps()
+    with patch("server.requests.get", side_effect=req_lib.exceptions.Timeout):
+        r = client.get("/route")
+    assert r.status_code == 503
+    assert r.get_json()["error"] == "osrm_timeout"
+
+def test_route_osrm_connection_error_returns_503(client):
+    _set_gps()
+    with patch("server.requests.get", side_effect=req_lib.exceptions.ConnectionError):
+        r = client.get("/route")
+    assert r.status_code == 503
+    assert r.get_json()["error"] == "osrm_connection_error"
+
+def test_route_osrm_http_error_returns_503(client):
+    _set_gps()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.side_effect = req_lib.exceptions.HTTPError("404")
+    with patch("server.requests.get", return_value=mock_resp):
+        r = client.get("/route")
+    assert r.status_code == 503
+    assert r.get_json()["error"] == "osrm_http_error"
+
+def test_route_osrm_json_error_returns_503(client):
+    _set_gps()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.side_effect = ValueError("bad JSON")
+    with patch("server.requests.get", return_value=mock_resp):
+        r = client.get("/route")
+    assert r.status_code == 503
+    assert r.get_json()["error"] == "osrm_json_error"
+
+# ── /route – 200 success ──────────────────────────────────────────────────
+
+def test_route_success_returns_200(client):
+    _set_gps()
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = {
         "code": "Ok",
         "routes": [{
-            "distance": 12345.0,
-            "duration": 678.0,
-            "legs": [{
-                "steps": [
-                    {"maneuver": {"type": "depart"}, "name": "Main St", "distance": 500},
-                    {"maneuver": {"type": "turn", "modifier": "left"}, "name": "2nd Ave", "distance": 1200},
-                    {"maneuver": {"type": "arrive"}, "name": "", "distance": 0},
-                ]
-            }],
-            "geometry": {"coordinates": [[78.0, 17.0], [78.1, 17.1], [78.2, 17.2]]},
-        }],
+            "geometry": {"type": "LineString", "coordinates": [[78.486, 17.385], [78.487, 17.386]]},
+            "distance": 1234.5,
+            "duration": 300.0
+        }]
     }
-
-
-class FlaskRouteTests(unittest.TestCase):
-
-    def setUp(self):
-        server.app.config["TESTING"] = True
-        self.client = server.app.test_client()
-        with server.data_lock:
-            server.latest_data.update({
-                "lat": "", "lng": "",
-                "msg": "Waiting for LoRa data...",
-                "rssi": "N/A", "seq": None, "dropped": 0,
-            })
-            server.gps_history.clear()
-
-    def test_data_returns_initial_state(self):
-        resp = self.client.get("/data")
-        self.assertEqual(resp.status_code, 200)
-        body = resp.get_json()
-        self.assertEqual(body["lat"], "")
-        self.assertEqual(body["rssi"], "N/A")
-        self.assertEqual(body["dropped"], 0)
-        self.assertIsNone(body["seq"])
-
-    def test_history_empty(self):
-        resp = self.client.get("/history")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json(), {"points": []})
-
-    def test_history_after_ingest(self):
-        server._ingest_line("DATA:1,17.0,78.0,hello,RSSI:-80")
-        server._ingest_line("DATA:2,17.1,78.1,hello,RSSI:-81")
-        resp = self.client.get("/history")
-        points = resp.get_json()["points"]
-        self.assertEqual(len(points), 2)
-        self.assertEqual(points[0], [17.0, 78.0])
-
-    def test_route_no_gps_yet(self):
-        resp = self.client.get("/route")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()["error"], "No GPS data yet")
-
-    def test_route_invalid_cached_coords(self):
-        with server.data_lock:
-            server.latest_data["lat"] = "not-a-number"
-            server.latest_data["lng"] = "78.0"
-        resp = self.client.get("/route")
-        self.assertIn("Invalid GPS coordinates", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_osrm_timeout(self, mock_get):
-        mock_get.side_effect = requests.exceptions.Timeout()
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("timeout", resp.get_json()["error"].lower())
-
-    @patch("server.requests.get")
-    def test_route_osrm_connection_error(self, mock_get):
-        mock_get.side_effect = requests.exceptions.ConnectionError()
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("Cannot reach OSRM", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_osrm_http_error(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_resp)
-        mock_get.return_value = mock_resp
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("HTTP error", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_osrm_invalid_json(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.return_value = None
-        mock_resp.json.side_effect = ValueError("not json")
-        mock_get.return_value = mock_resp
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("invalid JSON", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_osrm_no_route_found(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {"code": "NoRoute"}
-        mock_get.return_value = mock_resp
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("NoRoute", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_osrm_malformed_payload(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = {"code": "Ok"}
-        mock_get.return_value = mock_resp
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        self.assertIn("no routes", resp.get_json()["error"])
-
-    @patch("server.requests.get")
-    def test_route_success(self, mock_get):
-        mock_resp = MagicMock()
-        mock_resp.raise_for_status.return_value = None
-        mock_resp.json.return_value = osrm_ok_response()
-        mock_get.return_value = mock_resp
-        with server.data_lock:
-            server.latest_data.update({"lat": "17.0", "lng": "78.0"})
-        resp = self.client.get("/route")
-        body = resp.get_json()
-        self.assertNotIn("error", body)
-        self.assertEqual(body["distance"], "12.3 km")
-        self.assertEqual(body["duration"], "11 min")
-        self.assertGreaterEqual(len(body["steps"]), 3)
-        self.assertEqual(body["geometry"][0], [17.0, 78.0])
-
-
-if __name__ == "__main__":
-    unittest.main()
+    with patch("server.requests.get", return_value=mock_resp):
+        r = client.get("/route")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "geometry" in data
+    assert data["distance"] == pytest.approx(1234.5)
+    assert data["duration"] == pytest.approx(300.0)

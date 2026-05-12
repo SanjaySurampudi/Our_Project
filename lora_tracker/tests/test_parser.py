@@ -1,124 +1,124 @@
 """
-Unit tests for the packet parser in server.py
+test_parser.py – unit tests for server.is_valid() and parse_packet()
 
-Run from the project root:
-    python -m pytest tests/test_parser.py -v
-or:
-    python -m unittest tests/test_parser.py
+Covers:
+  • Legacy 4-field format
+  • Sequence-number 8-field format
+  • Negative sequence number (explicit rejection)
+  • Boundary lat/lng values
+  • Malformed RSSI
+  • Extra commas / too-few fields
+  • is_valid / parse_packet round-trip
 """
 
-import os
 import sys
-import unittest
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# Allow running tests directly: add project root to sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
+import pytest
 from server import is_valid, parse_packet
 
+# ── is_valid: legacy format ───────────────────────────────────────────────
 
-class TestIsValid(unittest.TestCase):
-    # -------- valid packets --------
-    def test_valid_new_format_with_seq(self):
-        self.assertTrue(is_valid("DATA:1,17.385000,78.486700,Hello Trainee!,RSSI:-87"))
+def test_valid_legacy_basic():
+    assert is_valid("17.3850,78.4867,Hello,RSSI:-72") is True
 
-    def test_valid_new_format_seq_zero(self):
-        self.assertTrue(is_valid("DATA:0,17.0,78.0,msg,RSSI:-50"))
+def test_valid_legacy_empty_msg():
+    assert is_valid("17.3850,78.4867,,RSSI:-72") is True
 
-    def test_valid_large_sequence_number(self):
-        self.assertTrue(is_valid("DATA:99999,10.5,20.5,m,RSSI:-100"))
+def test_valid_legacy_boundary_lat_max():
+    assert is_valid("90.0,0.0,msg,RSSI:-50") is True
 
-    def test_valid_legacy_format(self):
-        self.assertTrue(is_valid("DATA:17.385,78.486,Hello,RSSI:-87"))
+def test_valid_legacy_boundary_lat_min():
+    assert is_valid("-90.0,0.0,msg,RSSI:-50") is True
 
-    def test_valid_negative_coords(self):
-        self.assertTrue(is_valid("DATA:5,-89.9,-179.9,south,RSSI:-95"))
+def test_valid_legacy_boundary_lng_max():
+    assert is_valid("0.0,180.0,msg,RSSI:-50") is True
 
-    def test_valid_extreme_coords(self):
-        self.assertTrue(is_valid("DATA:5,90,180,edge,RSSI:-100"))
-        self.assertTrue(is_valid("DATA:5,-90,-180,edge,RSSI:-100"))
+def test_valid_legacy_boundary_lng_min():
+    assert is_valid("0.0,-180.0,msg,RSSI:-50") is True
 
-    def test_valid_message_with_spaces(self):
-        self.assertTrue(is_valid("DATA:7,17.0,78.0,Hello World From LoRa,RSSI:-70"))
+def test_invalid_legacy_lat_out_of_range():
+    assert is_valid("91.0,78.0,msg,RSSI:-72") is False
 
-    def test_valid_positive_rssi(self):
-        # Some boards rarely report positive RSSI, but it's a valid int
-        self.assertTrue(is_valid("DATA:1,17.0,78.0,m,RSSI:5"))
+def test_invalid_legacy_lng_out_of_range():
+    assert is_valid("17.0,181.0,msg,RSSI:-72") is False
 
-    # -------- invalid packets --------
-    def test_missing_prefix(self):
-        self.assertFalse(is_valid("17.385,78.486,Hello,RSSI:-87"))
+def test_invalid_legacy_too_few_fields():
+    assert is_valid("17.0,78.0,RSSI:-72") is False
 
-    def test_wrong_prefix(self):
-        self.assertFalse(is_valid("DATX:1,17.0,78.0,m,RSSI:-50"))
+def test_invalid_legacy_no_rssi():
+    assert is_valid("17.0,78.0,msg,badfield") is False
 
-    def test_missing_rssi(self):
-        self.assertFalse(is_valid("DATA:1,17.385,78.486,Hello"))
+def test_invalid_legacy_rssi_not_integer():
+    assert is_valid("17.0,78.0,msg,RSSI:-7.5") is False
 
-    def test_rssi_not_integer(self):
-        self.assertFalse(is_valid("DATA:1,17.0,78.0,m,RSSI:abc"))
+def test_invalid_legacy_empty():
+    assert is_valid("") is False
 
-    def test_lat_out_of_range(self):
-        self.assertFalse(is_valid("DATA:1,91.0,78.0,m,RSSI:-50"))
-        self.assertFalse(is_valid("DATA:1,-91.0,78.0,m,RSSI:-50"))
+def test_invalid_legacy_whitespace_only():
+    assert is_valid("   ") is False
 
-    def test_lng_out_of_range(self):
-        self.assertFalse(is_valid("DATA:1,17.0,181.0,m,RSSI:-50"))
-        self.assertFalse(is_valid("DATA:1,17.0,-181.0,m,RSSI:-50"))
+# ── is_valid: sequence format ─────────────────────────────────────────────
 
-    def test_non_numeric_coords(self):
-        self.assertFalse(is_valid("DATA:1,abc,78.0,m,RSSI:-50"))
-        self.assertFalse(is_valid("DATA:1,17.0,xyz,m,RSSI:-50"))
+def test_valid_seq_basic():
+    assert is_valid("0,17.385,78.486,123.5,5.2,270.0,Hello,RSSI:-65") is True
 
-    def test_empty_message(self):
-        self.assertFalse(is_valid("DATA:1,17.0,78.0,,RSSI:-50"))
+def test_valid_seq_zero():
+    assert is_valid("0,0.0,0.0,0.0,0.0,0.0,,RSSI:0") is True
 
-    def test_whitespace_only_message(self):
-        self.assertFalse(is_valid("DATA:1,17.0,78.0,    ,RSSI:-50"))
+def test_valid_seq_large():
+    assert is_valid("99999,17.385,78.486,0.0,0.0,0.0,msg,RSSI:-90") is True
 
-    def test_empty_string(self):
-        self.assertFalse(is_valid(""))
+def test_invalid_seq_negative():
+    """Negative sequence numbers must be explicitly rejected."""
+    assert is_valid("-5,17.0,78.0,0,0,0,msg,RSSI:-50") is False
 
-    def test_only_prefix(self):
-        self.assertFalse(is_valid("DATA:"))
+def test_invalid_seq_too_few_fields():
+    assert is_valid("1,17.0,78.0,0,0,RSSI:-50") is False
 
-    def test_none_input(self):
-        self.assertFalse(is_valid(None))
+def test_invalid_seq_bad_lat():
+    assert is_valid("1,abc,78.0,0,0,0,msg,RSSI:-50") is False
 
-    def test_non_string_input(self):
-        self.assertFalse(is_valid(12345))
-        self.assertFalse(is_valid(["DATA:", "1", "17", "78"]))
+# ── parse_packet: round-trip ──────────────────────────────────────────────
 
-    def test_truncated_packet(self):
-        self.assertFalse(is_valid("DATA:1,17.0"))
-        self.assertFalse(is_valid("DATA:1,17.0,78.0"))
+def test_parse_legacy_returns_correct_fields():
+    p = parse_packet("17.3850,78.4867,Hello,RSSI:-72")
+    assert p["lat"]     == pytest.approx(17.3850, rel=1e-4)
+    assert p["lng"]     == pytest.approx(78.4867, rel=1e-4)
+    assert p["msg"]     == "Hello"
+    assert p["rssi"]    == -72
+    assert p["node_id"] == "default"
+    assert "timestamp"  in p
 
+def test_parse_seq_returns_correct_fields():
+    p = parse_packet("3,17.3850,78.4867,123.5,10.2,180.0,Emergency,RSSI:-55")
+    assert p["seq"]     == 3
+    assert p["lat"]     == pytest.approx(17.3850, rel=1e-4)
+    assert p["alt"]     == pytest.approx(123.5,   rel=1e-2)
+    assert p["speed"]   == pytest.approx(10.2,    rel=1e-2)
+    assert p["heading"] == pytest.approx(180.0,   rel=1e-2)
+    assert p["msg"]     == "Emergency"
+    assert p["rssi"]    == -55
+    assert p["node_id"] == "default"
 
-class TestParsePacket(unittest.TestCase):
-    def test_parse_new_format(self):
-        pkt = parse_packet("DATA:42,17.385000,78.486700,Hello Trainee!,RSSI:-87")
-        self.assertEqual(pkt['seq'], 42)
-        self.assertEqual(pkt['lat'], "17.385000")
-        self.assertEqual(pkt['lng'], "78.486700")
-        self.assertEqual(pkt['msg'], "Hello Trainee!")
-        self.assertEqual(pkt['rssi'], "-87")
+def test_parse_preserves_node_id():
+    p = parse_packet("1,10.0,20.0,0,0,0,test,RSSI:-80")
+    assert p["node_id"] == "default"
 
-    def test_parse_legacy_format(self):
-        pkt = parse_packet("DATA:17.385,78.486,Hello,RSSI:-87")
-        self.assertIsNone(pkt['seq'])
-        self.assertEqual(pkt['lat'], "17.385")
-        self.assertEqual(pkt['lng'], "78.486")
-        self.assertEqual(pkt['msg'], "Hello")
-        self.assertEqual(pkt['rssi'], "-87")
+def test_parse_msg_with_semicolons():
+    """Messages may contain semicolons (comma-stripped by TX)."""
+    p = parse_packet("0,17.0,78.0,0,0,0,Hello;World,RSSI:-60")
+    assert p["msg"] == "Hello;World"
 
-    def test_message_with_spaces_preserved(self):
-        pkt = parse_packet("DATA:1,17.0,78.0,Hello World From LoRa,RSSI:-70")
-        self.assertEqual(pkt['msg'], "Hello World From LoRa")
+# ── Additional edge-case coverage ─────────────────────────────────────────
 
-    def test_seq_zero_recognised(self):
-        pkt = parse_packet("DATA:0,17.0,78.0,m,RSSI:-50")
-        self.assertEqual(pkt['seq'], 0)
+def test_is_valid_strips_whitespace():
+    assert is_valid("  17.385,78.486,msg,RSSI:-70  ") is True
 
+def test_is_valid_rssi_positive():
+    """Some modules report positive RSSI near 0 dBm."""
+    assert is_valid("17.385,78.486,msg,RSSI:0") is True
 
-if __name__ == '__main__':
-    unittest.main()
+def test_is_valid_rssi_negative_large():
+    assert is_valid("17.385,78.486,msg,RSSI:-120") is True

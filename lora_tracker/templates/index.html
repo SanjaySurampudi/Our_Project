@@ -1,67 +1,329 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>LoRa Long Distance Tracker</title>
-  <meta charset="utf-8">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LoRa GPS Tracker – Live Dashboard</title>
+
+  <!-- Leaflet core served from local static (always available offline) -->
+  <link  rel="stylesheet" href="{{ url_for('static', filename='leaflet.min.css') }}" />
+  <script src="{{ url_for('static', filename='leaflet.min.js') }}"></script>
+
+  <!-- leaflet.offline bundled locally – fixes CDN-breaks-offline issue -->
+  <script src="{{ url_for('static', filename='leaflet.offline.min.js') }}"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      grid-template-columns: 320px 1fr;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      grid-column: 1 / -1;
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      display: flex;
+      align-items: center;
+      padding: 0 1.25rem;
+      gap: 1rem;
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; letter-spacing: .03em; }
+    .badge {
+      font-size: .7rem; padding: 2px 8px; border-radius: 999px;
+      background: #3b3f5c; color: #a5b4fc;
+    }
+    #conn-status {
+      margin-left: auto; font-size: .75rem;
+      display: flex; align-items: center; gap: 6px;
+    }
+    #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: #f87171; }
+    #conn-dot.live { background: #34d399; }
+
+    /* ── Sidebar ────────────────────────────────────────────── */
+    aside {
+      background: #13161f;
+      border-right: 1px solid #2d3148;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: .75rem;
+    }
+
+    .card {
+      background: #1a1d2e;
+      border: 1px solid #2d3148;
+      border-radius: .75rem;
+      padding: .85rem 1rem;
+    }
+    .card-title {
+      font-size: .65rem; text-transform: uppercase;
+      letter-spacing: .08em; color: #6b7280; margin-bottom: .5rem;
+    }
+    .card-value {
+      font-size: 1.35rem; font-weight: 700; color: #f1f5f9;
+    }
+    .card-sub { font-size: .75rem; color: #9ca3af; margin-top: 2px; }
+
+    /* RSSI meter */
+    #rssi-bar-wrap {
+      height: 6px; background: #2d3148; border-radius: 3px; margin-top: 8px;
+    }
+    #rssi-bar {
+      height: 100%; border-radius: 3px;
+      background: linear-gradient(90deg, #f87171, #fbbf24, #34d399);
+      transition: width .4s ease;
+    }
+
+    /* Message box */
+    #msg-text {
+      font-size: .85rem; color: #c7d2fe;
+      word-break: break-word; line-height: 1.45;
+      min-height: 2em;
+    }
+
+    /* History list */
+    #history-list {
+      list-style: none; max-height: 180px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #history-list li {
+      font-size: .7rem; color: #94a3b8;
+      background: #0f1117; border-radius: 6px;
+      padding: 4px 8px;
+    }
+
+    /* offline-tile banner */
+    #offline-banner {
+      display: none; text-align: center;
+      font-size: .72rem; color: #fbbf24;
+      background: #2d2208; border: 1px solid #fbbf24;
+      border-radius: 6px; padding: 6px;
+    }
+
+    /* ── Map ────────────────────────────────────────────────── */
+    #map { width: 100%; height: 100%; }
+  </style>
 </head>
 <body>
 
-<div class="topbar">
-  <div class="dot"></div>
-  <h2>LoRa Long Distance Tracker — Live</h2>
-  <span style="font-size:12px;color:#888" id="last-update">Waiting...</span>
-</div>
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <h1>LoRa GPS Tracker</h1>
+  <span class="badge">433 MHz</span>
+  <div id="conn-status">
+    <div id="conn-dot"></div>
+    <span id="conn-label">Connecting…</span>
+  </div>
+</header>
 
+<!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+<aside>
+
+  <div id="offline-banner">⚠ Offline mode – cached tiles only</div>
+
+  <div class="card">
+    <div class="card-title">GPS Position</div>
+    <div class="card-value" id="pos-val">—</div>
+    <div class="card-sub" id="pos-age"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Signal Strength (RSSI)</div>
+    <div class="card-value" id="rssi-val">—</div>
+    <div id="rssi-bar-wrap"><div id="rssi-bar" style="width:0%"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Altitude / Speed / Heading</div>
+    <div id="kin-val" class="card-sub" style="font-size:.85rem;color:#e2e8f0;">—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Message</div>
+    <div id="msg-text">—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Route to Receiver</div>
+    <div class="card-sub" id="route-info">—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recent History</div>
+    <ul id="history-list"></ul>
+  </div>
+
+</aside>
+
+<!-- ── Map ─────────────────────────────────────────────────────────────── -->
 <div id="map"></div>
 
-<div class="controls">
-  <span class="controls-label">Show on map:</span>
-  <button class="toggle-btn btn-road active"     onclick="toggleLayer('road')">Road route</button>
-  <button class="toggle-btn btn-straight active" onclick="toggleLayer('straight')">Straight line</button>
-  <button class="toggle-btn btn-history active"  onclick="toggleLayer('history')">GPS track history</button>
-  <button style="margin-left:auto;padding:6px 14px;border-radius:20px;border:none;
-                 background:#1D9E75;color:white;font-size:12px;cursor:pointer"
-          onclick="recalcRoute()">Recalculate route</button>
-</div>
-
-<div class="cards">
-  <div class="card"><div class="lbl">TX Latitude</div><div class="val" id="c-lat">--</div></div>
-  <div class="card"><div class="lbl">TX Longitude</div><div class="val" id="c-lng">--</div></div>
-  <div class="card"><div class="lbl">Message</div><div class="val" id="c-msg" style="font-size:13px">--</div></div>
-  <div class="card"><div class="lbl">RSSI</div><div class="val" id="c-rssi">--</div></div>
-  <div class="card"><div class="lbl">Track points</div><div class="val" id="c-pts">0</div></div>
-  <div class="card"><div class="lbl">Seq #</div><div class="val" id="c-seq">--</div></div>
-  <div class="card"><div class="lbl">Dropped</div><div class="val" id="c-drop" style="color:#e74c3c">0</div></div>
-</div>
-
-<div class="route-panel">
-  <h3>Path information</h3>
-  <span class="rstat">Road distance: <b id="r-dist">--</b></span>
-  <span class="rstat">Drive time: <b id="r-time">--</b></span>
-  <span class="rstat-line">Straight line: <b id="r-line">--</b></span>
-  <ul class="steps-list" id="r-steps">
-    <li>Waiting for GPS data to calculate route...</li>
-  </ul>
-  <div class="history-info" id="hist-info">GPS track history: 0 points recorded</div>
-</div>
-
-<div class="legend">
-  <div class="leg-item"><div class="leg-dot" style="background:#e74c3c"></div> Transmitter (live)</div>
-  <div class="leg-item"><div class="leg-dot" style="background:#3498db"></div> Receiver (fixed)</div>
-  <div class="leg-item"><div class="leg-line" style="background:#1D9E75"></div> Road route (OSRM)</div>
-  <div class="leg-item"><div class="leg-dashed"></div> Straight line</div>
-  <div class="leg-item"><div class="leg-dotted"></div> GPS track history</div>
-</div>
-
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <script>
-  // Receiver coordinates passed from Flask
-  window.RX_LAT = {{ rx_lat }};
-  window.RX_LNG = {{ rx_lng }};
-</script>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+  // ── Config injected by Flask ──────────────────────────────────────────
+  const RECEIVER_LAT = {{ receiver_lat }};
+  const RECEIVER_LNG = {{ receiver_lng }};
+  const REFRESH_MS   = 3000;
 
+  // ── Map initialisation ────────────────────────────────────────────────
+  const map = L.map('map').setView([RECEIVER_LAT, RECEIVER_LNG], 13);
+
+  // Try offline tile layer first; fall back to online OSM
+  let tileLayer;
+  try {
+    tileLayer = L.tileLayer.offline(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '© OpenStreetMap contributors', maxZoom: 19 }
+    );
+  } catch (e) {
+    tileLayer = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { attribution: '© OpenStreetMap contributors', maxZoom: 19 }
+    );
+  }
+  tileLayer.addTo(map);
+  tileLayer.on('tileerror', () => {
+    document.getElementById('offline-banner').style.display = 'block';
+  });
+
+  // Markers
+  const receiverIcon = L.divIcon({
+    className: '', iconSize: [14,14],
+    html: '<div style="width:14px;height:14px;border-radius:50%;background:#a5b4fc;border:2px solid #fff;"></div>'
+  });
+  const trackerIcon = L.divIcon({
+    className: '', iconSize: [14,14],
+    html: '<div style="width:14px;height:14px;border-radius:50%;background:#34d399;border:2px solid #fff;box-shadow:0 0 6px #34d399;"></div>'
+  });
+
+  L.marker([RECEIVER_LAT, RECEIVER_LNG], {icon: receiverIcon})
+   .addTo(map).bindPopup('Receiver');
+
+  let trackerMarker = null;
+  let routeLayer    = null;
+  let routePolyline = null;
+
+  // ── Haversine distance ────────────────────────────────────────────────
+  function haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371000, toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2)**2 +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  // ── RSSI → percentage (typical range -120 dBm … -30 dBm) ─────────────
+  function rssiPct(rssi) {
+    return Math.max(0, Math.min(100, ((rssi + 120) / 90) * 100));
+  }
+
+  // ── Refresh live data ─────────────────────────────────────────────────
+  async function refreshData() {
+    try {
+      const resp = await fetch('/data');
+      if (!resp.ok) throw new Error(resp.status);
+      const d = await resp.json();
+
+      document.getElementById('conn-dot').classList.add('live');
+      document.getElementById('conn-label').textContent = 'Live';
+
+      if (d.lat === undefined) return;
+
+      // Position
+      document.getElementById('pos-val').textContent =
+        `${d.lat.toFixed(5)}, ${d.lng.toFixed(5)}`;
+
+      const ageSec = d.timestamp
+        ? Math.round(Date.now()/1000 - d.timestamp) : '?';
+      document.getElementById('pos-age').textContent = `${ageSec} s ago`;
+
+      // RSSI
+      const rssi = d.rssi ?? 0;
+      document.getElementById('rssi-val').textContent = `${rssi} dBm`;
+      document.getElementById('rssi-bar').style.width = rssiPct(rssi) + '%';
+
+      // Kinematics
+      const alt  = d.alt     != null ? d.alt.toFixed(1)     + ' m'   : '—';
+      const spd  = d.speed   != null ? d.speed.toFixed(1)   + ' km/h': '—';
+      const hdg  = d.heading != null ? d.heading.toFixed(0) + '°'    : '—';
+      document.getElementById('kin-val').textContent =
+        `Alt ${alt}  ·  Spd ${spd}  ·  Hdg ${hdg}`;
+
+      // Message
+      document.getElementById('msg-text').textContent = d.msg || '—';
+
+      // Marker
+      const latlng = [d.lat, d.lng];
+      if (!trackerMarker) {
+        trackerMarker = L.marker(latlng, {icon: trackerIcon})
+          .addTo(map).bindPopup('Tracker');
+        map.setView(latlng, 15);
+      } else {
+        trackerMarker.setLatLng(latlng);
+      }
+
+      // Straight-line distance
+      const dist = haversine(d.lat, d.lng, RECEIVER_LAT, RECEIVER_LNG);
+      document.getElementById('route-info').textContent =
+        `Direct: ${(dist/1000).toFixed(2)} km`;
+
+    } catch (err) {
+      document.getElementById('conn-dot').classList.remove('live');
+      document.getElementById('conn-label').textContent = 'Disconnected';
+    }
+  }
+
+  // ── Refresh route ─────────────────────────────────────────────────────
+  async function refreshRoute() {
+    try {
+      const resp = await fetch('/route');
+      const r    = await resp.json();
+
+      if (routePolyline) { map.removeLayer(routePolyline); routePolyline = null; }
+
+      if (r.error) return;   // soft error – no GPS yet or route not found
+
+      const coords = r.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+      routePolyline = L.polyline(coords, { color: '#a5b4fc', weight: 3, opacity: .7 })
+        .addTo(map);
+
+      const km  = (r.distance / 1000).toFixed(2);
+      const min = Math.round(r.duration / 60);
+      document.getElementById('route-info').textContent =
+        `Route: ${km} km · ~${min} min`;
+    } catch (_) { /* OSRM unreachable – silently skip */ }
+  }
+
+  // ── History ───────────────────────────────────────────────────────────
+  async function refreshHistory() {
+    try {
+      const resp = await fetch('/history');
+      const hist = await resp.json();
+      const list = document.getElementById('history-list');
+      list.innerHTML = '';
+      hist.slice(-10).reverse().forEach(p => {
+        const li = document.createElement('li');
+        li.textContent = `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}  RSSI ${p.rssi}`;
+        list.appendChild(li);
+      });
+    } catch (_) {}
+  }
+
+  // ── Poll ──────────────────────────────────────────────────────────────
+  (async function tick() {
+    await refreshData();
+    await refreshRoute();
+    await refreshHistory();
+    setTimeout(tick, REFRESH_MS);
+  })();
+</script>
 </body>
 </html>
