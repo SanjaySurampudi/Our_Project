@@ -2,8 +2,24 @@
 // RX_LAT and RX_LNG are injected by templates/index.html
 
 var map = L.map('map').setView([window.RX_LAT, window.RX_LNG], 13);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {attribution:'OpenStreetMap', maxZoom:19}).addTo(map);
+var tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  {attribution:'OpenStreetMap', maxZoom:19});
+
+// Add error handler for offline/unreachable tile server
+tileLayer.on('tileerror', function() {
+  // Only show banner once
+  if (!document.getElementById('map-offline-banner')) {
+    var banner = document.createElement('div');
+    banner.id = 'map-offline-banner';
+    banner.style.cssText = 'position:absolute;top:60px;left:50%;transform:translateX(-50%);' +
+      'background:#f39c12;color:white;padding:10px 20px;border-radius:5px;z-index:1000;' +
+      'font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)';
+    banner.textContent = '⚠️ Map tiles unavailable (no internet). Markers still work.';
+    document.getElementById('map').appendChild(banner);
+  }
+});
+
+tileLayer.addTo(map);
 
 var txIcon = L.divIcon({ className:'',
   html:'<div style="background:#e74c3c;width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 1px 5px rgba(0,0,0,.4)"></div>',
@@ -29,8 +45,8 @@ var showHistory  = true;
 var lastRouteCalcLat = null;
 var lastRouteCalcLng = null;
 
-function haversineMeters(lat1, lng1, lat2, lng2) {
-  var R = 6371000; // Earth radius in meters
+function haversine(lat1, lng1, lat2, lng2, unit) {
+  var R = (unit === 'km') ? 6371 : 6371000; // Earth radius in km or meters
   var dLat = (lat2 - lat1) * Math.PI / 180;
   var dLng = (lng2 - lng1) * Math.PI / 180;
   var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
@@ -43,7 +59,7 @@ function shouldRecalculateRoute(lat, lng) {
   if (lastRouteCalcLat === null || lastRouteCalcLng === null) {
     return true; // First calculation
   }
-  var distance = haversineMeters(lastRouteCalcLat, lastRouteCalcLng, lat, lng);
+  var distance = haversine(lastRouteCalcLat, lastRouteCalcLng, lat, lng, 'meters');
   return distance > 5; // Recalculate if moved more than 5 meters
 }
 
@@ -61,16 +77,6 @@ function toggleLayer(type) {
     document.querySelector('.btn-history').classList.toggle('active', showHistory);
     if (histLayer) { showHistory ? histLayer.addTo(map) : map.removeLayer(histLayer); }
   }
-}
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-  var R = 6371;
-  var dLat = (lat2 - lat1) * Math.PI / 180;
-  var dLng = (lng2 - lng1) * Math.PI / 180;
-  var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
-          Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*
-          Math.sin(dLng/2)*Math.sin(dLng/2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
 function recalcRoute() {
@@ -104,7 +110,7 @@ function recalcRoute() {
 
 function updateStraightLine(txLat, txLng) {
   if (lineLayer) map.removeLayer(lineLayer);
-  var dist = haversineKm(txLat, txLng, window.RX_LAT, window.RX_LNG);
+  var dist = haversine(txLat, txLng, window.RX_LAT, window.RX_LNG, 'km');
   var distStr = dist >= 1 ? dist.toFixed(1) + ' km' : (dist*1000).toFixed(0) + ' m';
   document.getElementById('r-line').textContent = distStr;
   lineLayer = L.polyline([[txLat, txLng],[window.RX_LAT, window.RX_LNG]],

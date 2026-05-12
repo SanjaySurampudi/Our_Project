@@ -35,6 +35,10 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define LORA_RST    9
 #define LORA_DIO0   2
 
+// OLED status tracking
+bool display_ok = false;
+unsigned long last_display_attempt = 0;
+
 void setup() {
   Serial.begin(9600);
 
@@ -47,15 +51,17 @@ void setup() {
 
   // Initialise OLED (I2C address 0x3C)
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("OLED failed");
-    while (1);
+    Serial.println("OLED init failed - continuing without display");
+    display_ok = false;
+  } else {
+    display_ok = true;
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("Waiting for data...");
+    display.display();
   }
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println("Waiting for data...");
-  display.display();
 
   Serial.println("LoRa RX ready");
 }
@@ -101,7 +107,7 @@ void loop() {
   bool hasSeq = false;
   if (thirdComma > 0) {
     String first = received.substring(0, firstComma);
-    // Sanity check: sequence numbers should be 1-10 digits, coordinates start with - or digit and have a decimal point
+    // Sanity check: sequence numbers should be 0-10 digits (including zero)
     if (first.length() > 0 && first.length() <= 10) {
       hasSeq = true;
       for (unsigned int i = 0; i < first.length(); i++) {
@@ -121,14 +127,29 @@ void loop() {
     msg = received.substring(secondComma + 1);
   }
 
-  // Update OLED
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("GPS Tracker RX");
-  if (hasSeq) display.println("Seq: " + seqStr);
-  display.println("Lat: " + lat);
-  display.println("Lng: " + lng);
-  display.println("Msg: " + msg);
-  display.println("RSSI: " + String(rssi) + " dBm");
-  display.display();
+  // Update OLED with error handling
+  if (display_ok) {
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("GPS Tracker RX");
+    if (hasSeq) display.println("Seq: " + seqStr);
+    display.println("Lat: " + lat);
+    display.println("Lng: " + lng);
+    display.println("Msg: " + msg);
+    display.println("RSSI: " + String(rssi) + " dBm");
+    display.display();
+  } else {
+    // Periodically retry display initialization (every 30 seconds)
+    unsigned long now = millis();
+    if (now - last_display_attempt > 30000) {
+      last_display_attempt = now;
+      if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println("  OLED reconnected!");
+        display_ok = true;
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+      }
+    }
+  }
 }

@@ -43,6 +43,7 @@ import time
 import serial
 import serial.tools.list_ports
 import requests
+from collections import deque
 from flask import Flask, render_template, jsonify
 
 app = Flask(__name__)
@@ -57,7 +58,7 @@ latest_data = {
     "seq":     None,
     "dropped": 0,
 }
-gps_history = []        # past TX coordinates
+gps_history = deque(maxlen=500)  # O(1) append with automatic cap
 MAX_HISTORY = 500       # keep last 500 points
 
 # ---- SET YOUR RECEIVER FIXED LOCATION HERE ----
@@ -301,8 +302,7 @@ def _ingest_line(line):
 
         try:
             gps_history.append([float(pkt['lat']), float(pkt['lng'])])
-            if len(gps_history) > MAX_HISTORY:
-                gps_history.pop(0)
+            # deque automatically removes oldest when maxlen is exceeded
         except ValueError:
             pass
 
@@ -368,8 +368,16 @@ def read_serial(port_override=None):
         print()
         print("  The web dashboard will keep running but will show 'Waiting for LoRa data...'")
         print("=" * 60)
-        return     # exit the thread cleanly — no infinite retry on a phantom port
-
+        
+        # Periodic retry: check every 10 seconds if Arduino was plugged in
+        while True:
+            time.sleep(10)
+            PORT = _resolve_port(port_override)
+            if PORT is not None:
+                print(f"  ✓ Arduino detected on {PORT} - connecting...")
+                break
+            print("  Still waiting for Arduino...")
+    
     print(f"Connecting to {PORT}...")
     consecutive_failures = 0
     while True:

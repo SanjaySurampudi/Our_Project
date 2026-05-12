@@ -32,6 +32,7 @@ TinyGPSPlus gps;
 
 String   textMessage = "Hello Trainee!";   // default message (set once)
 uint32_t sequence    = 0;                  // monotonically increasing packet counter
+                                            // wraps to 0 after 4,294,967,295 (~136 years at 2s intervals)
 
 void setup() {
   Serial.begin(9600);

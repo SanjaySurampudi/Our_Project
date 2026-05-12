@@ -167,3 +167,29 @@ lines, simulating a loopback device. OSRM is mocked with
    via Serial Monitor, if the user's text contains commas, TX now prints
    a warning explaining they were replaced with spaces to protect the
    CSV packet format.
+
+8. **Offline map tile fallback.** Dashboard displays a warning banner when
+   OpenStreetMap tiles are unreachable (no internet), allowing markers and
+   routes to continue working without the map background.
+
+9. **Serial auto-reconnect with periodic retry.** If no Arduino is detected
+   at startup, server now polls every 10 seconds instead of exiting,
+   automatically connecting when the Arduino is plugged in.
+
+10. **RX.ino comment corrected.** Updated "1-10 digits" to "0-10 digits
+    (including zero)" to match the actual sequence number validation logic.
+
+11. **Performance: collections.deque for gps_history.** Replaced list with
+    `deque(maxlen=500)` for O(1) append operations instead of O(n) pop(0).
+
+12. **Unified haversine function in app.js.** Merged `haversineMeters()` and
+    `haversineKm()` into single `haversine(lat1, lng1, lat2, lng2, unit)`
+    function to eliminate code duplication.
+
+13. **OLED error handling in RX.ino.** If display.begin() fails, receiver
+    continues operating without display and periodically retries
+    initialization every 30 seconds instead of hanging forever.
+
+14. **uint32_t wrap behavior documented.** Added comment in TX.ino noting
+    that sequence wraps to 0 after 4,294,967,295 (~136 years at 2-second
+    intervals), which is expected behavior.
